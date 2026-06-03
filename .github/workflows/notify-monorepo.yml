@@ -1,0 +1,17 @@
+name: Notify Monorepo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger monorepo sync
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.MONOREPO_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/aeonmindai/runcrate_app/dispatches \
+            -d '{"event_type":"sdk-updated"}'

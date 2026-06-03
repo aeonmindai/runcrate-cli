@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+
+      - name: Parse version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building runcrate CLI ${VERSION}"
+
+      - name: Run tests
+        run: go test ./... -timeout 60s
+
+      - name: Cross-compile
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT:0:7} -X main.buildDate=${BUILD_DATE}"
+
+          GOOS=linux   GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/runcrate-linux-amd64   ./cmd/runcrate
+          GOOS=linux   GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/runcrate-linux-arm64   ./cmd/runcrate
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/runcrate-darwin-amd64  ./cmd/runcrate
+          GOOS=darwin  GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/runcrate-darwin-arm64  ./cmd/runcrate
+          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/runcrate-windows-amd64.exe ./cmd/runcrate
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum runcrate-* > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/runcrate-linux-amd64
+            dist/runcrate-linux-arm64
+            dist/runcrate-darwin-amd64
+            dist/runcrate-darwin-arm64
+            dist/runcrate-windows-amd64.exe
+            dist/checksums.txt
+          body: |
+            ## Install
+
+            **macOS / Linux:**
+            ```bash
+            curl -sSL https://runcrate.ai/install.sh | sh
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            irm https://runcrate.ai/install.ps1 | iex
+            ```
+
+            **Already installed?**
+            ```bash
+            runcrate update
+            ```
