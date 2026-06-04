@@ -6,11 +6,14 @@ import (
 	"strings"
 )
 
+// SSHKey mirrors the v1 API response shape, which is camelCase and returns the
+// stored fingerprint (not the raw public key). See src/lib/services/ssh-keys.ts.
 type SSHKey struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	PublicKey string `json:"public_key"`
-	CreatedAt string `json:"created_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	Type        string `json:"type"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type AddSSHKeyRequest struct {

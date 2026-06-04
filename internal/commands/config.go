@@ -70,7 +70,7 @@ var configShowCmd = &cobra.Command{
 			fmt.Printf("Workspace:     %s (%s)\n", cfg.ProjectName, cfg.Role)
 			env := cfg.Environment
 			if env == "" {
-				env = "default"
+				env = "main"
 			}
 			fmt.Printf("Environment:   %s\n", env)
 		} else if cfg.APIKey != "" {

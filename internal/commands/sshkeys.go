@@ -36,13 +36,13 @@ var sshKeysListCmd = &cobra.Command{
 		}
 
 		w := newTable()
-		fmt.Fprintf(w, "NAME\tFINGERPRINT\tADDED\n")
+		fmt.Fprintf(w, "NAME\tTYPE\tFINGERPRINT\tADDED\n")
 		for _, k := range keys {
-			fp := k.PublicKey
-			if len(fp) > 40 {
-				fp = fp[:20] + "..." + fp[len(fp)-15:]
+			added := k.CreatedAt
+			if len(added) >= 10 {
+				added = added[:10]
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", k.Name, fp, k.CreatedAt[:10])
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", k.Name, k.Type, k.Fingerprint, added)
 		}
 		return w.Flush()
 	},
