@@ -12,6 +12,12 @@ manage workspaces, storage, templates, and billing from your terminal.
 curl -sSL https://runcrate.ai/install.sh | sh
 ```
 
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install aeonmindai/tap/runcrate
+```
+
 **Windows (PowerShell):**
 
 ```powershell
@@ -55,7 +61,10 @@ make build-all                 # cross-compile all platforms into ./bin
 Releases are tag-driven. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`,
 which tests, cross-compiles the five targets, generates `checksums.txt`, and
 publishes a GitHub Release. The public installer scripts and `runcrate update`
-read these releases, so no separate publish step is needed.
+read these releases, so no separate publish step is needed. The same workflow asks
+[aeonmindai/homebrew-tap](https://github.com/aeonmindai/homebrew-tap) to regenerate its
+formula from the new checksums (needs the `HOMEBREW_TAP_TOKEN` secret; without it the
+tap's own six-hourly sync picks the release up).
 
 ```bash
 git tag v0.1.0
