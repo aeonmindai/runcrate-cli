@@ -327,3 +327,45 @@ func TestIsBudgetReached(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateInstanceAutoStop_SendsOnlyGivenFields(t *testing.T) {
+	var method, path string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		body = nil
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Write([]byte(`{"data":{"id":"inst-1","max_runtime_minutes":480,"idle_shutdown_minutes":null,` +
+			`"auto_stop_at":"2026-10-20T18:00:00.000Z"}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	maxRuntime := 480
+	inst, err := client.UpdateInstanceAutoStop("inst-1", map[string]*int{
+		"max_runtime_minutes":   &maxRuntime,
+		"idle_shutdown_minutes": nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstanceAutoStop() error: %v", err)
+	}
+	if method != "PATCH" || path != "/api/v1/instances/inst-1" {
+		t.Errorf("request = %s %s, want PATCH /api/v1/instances/inst-1", method, path)
+	}
+	if got := body["max_runtime_minutes"]; got != float64(480) {
+		t.Errorf("max_runtime_minutes sent = %v, want 480", got)
+	}
+	if got, ok := body["idle_shutdown_minutes"]; !ok || got != nil {
+		t.Errorf("idle_shutdown_minutes sent = %v (present %v), want null", got, ok)
+	}
+	if inst.AutoStopAt == nil || *inst.AutoStopAt != "2026-10-20T18:00:00.000Z" {
+		t.Errorf("AutoStopAt = %v", inst.AutoStopAt)
+	}
+
+	if _, err := client.UpdateInstanceAutoStop("inst-1", map[string]*int{"idle_shutdown_minutes": &maxRuntime}); err != nil {
+		t.Fatalf("UpdateInstanceAutoStop() error: %v", err)
+	}
+	if _, ok := body["max_runtime_minutes"]; ok {
+		t.Error("max_runtime_minutes sent although not given")
+	}
+}

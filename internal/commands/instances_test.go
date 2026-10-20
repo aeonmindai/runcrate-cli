@@ -162,3 +162,22 @@ func TestFormatMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAutoStopFlag(t *testing.T) {
+	if v, err := parseAutoStopFlag("max-runtime", "off", maxRuntimeMaxMinutes); err != nil || v != nil {
+		t.Errorf("off = %v, %v; want nil, nil", v, err)
+	}
+	if v, err := parseAutoStopFlag("max-runtime", "OFF", maxRuntimeMaxMinutes); err != nil || v != nil {
+		t.Errorf("OFF = %v, %v; want nil, nil", v, err)
+	}
+	if v, err := parseAutoStopFlag("max-runtime", "8h", maxRuntimeMaxMinutes); err != nil || v == nil || *v != 480 {
+		t.Errorf("8h = %v, %v; want 480", v, err)
+	}
+	if _, err := parseAutoStopFlag("idle-stop", "25h", idleStopMaxMinutes); err == nil {
+		t.Error("25h idle stop accepted, want out of range")
+	}
+	// An explicit empty value must not read as off.
+	if _, err := parseAutoStopFlag("max-runtime", "", maxRuntimeMaxMinutes); err == nil {
+		t.Error("empty value accepted, want an error")
+	}
+}

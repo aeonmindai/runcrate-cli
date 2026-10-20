@@ -40,6 +40,9 @@ means GPU use under 5% and nobody connected over SSH, the web terminal or the ed
 ```bash
 runcrate instances create --name train --gpu H100 --max-runtime 4h --idle-stop 30m
 runcrate instances info train   # Max runtime, Idle stop, Auto stop at, Stop reason
+
+# Extend it before a long job (total time from start), or turn a limit off
+runcrate instances auto-stop train --max-runtime 8h --idle-stop off
 ```
 
 Point the CLI at a different API origin with `runcrate config set url <url>` or the

@@ -43,6 +43,18 @@ func parseMinutesFlag(flag, value string, maxMinutes int) (*int, error) {
 	return &minutes, nil
 }
 
+// parseAutoStopFlag parses an auto-stop change: "off" turns the limit off (nil),
+// anything else is a duration as for create.
+func parseAutoStopFlag(flag, value string, maxMinutes int) (*int, error) {
+	if strings.EqualFold(value, "off") {
+		return nil, nil
+	}
+	if value == "" {
+		return nil, fmt.Errorf("--%s needs a duration like 30m or 4h, or off", flag)
+	}
+	return parseMinutesFlag(flag, value, maxMinutes)
+}
+
 // formatMinutes renders minutes the way the flags accept them: 30m, 4h, 1h30m.
 func formatMinutes(minutes int) string {
 	h, m := minutes/60, minutes%60
@@ -381,6 +393,71 @@ var instancesInfoCmd = &cobra.Command{
 	},
 }
 
+// ── auto-stop ───────────────────────────────────────────────────────────────
+
+var instancesAutoStopCmd = &cobra.Command{
+	Use:   "auto-stop <name-or-id>",
+	Short: "Change when a running instance stops on its own",
+	Long: `Change the max runtime or idle stop of a starting or running instance.
+
+Max runtime counts from when the instance started running, so give the total, not
+extra time. A change never stops the instance sooner than 2 minutes from now. Use
+off to turn a limit off; a flag you leave out keeps its value. Either limit
+terminates the instance.`,
+	Example: `  runcrate instances auto-stop training-run --max-runtime 8h
+  runcrate instances auto-stop notebook --idle-stop 30m
+  runcrate instances auto-stop job --max-runtime off --idle-stop off`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fields := map[string]*int{}
+		if cmd.Flags().Changed("max-runtime") {
+			raw, _ := cmd.Flags().GetString("max-runtime")
+			v, err := parseAutoStopFlag("max-runtime", raw, maxRuntimeMaxMinutes)
+			if err != nil {
+				return err
+			}
+			fields["max_runtime_minutes"] = v
+		}
+		if cmd.Flags().Changed("idle-stop") {
+			raw, _ := cmd.Flags().GetString("idle-stop")
+			v, err := parseAutoStopFlag("idle-stop", raw, idleStopMaxMinutes)
+			if err != nil {
+				return err
+			}
+			fields["idle_shutdown_minutes"] = v
+		}
+		if len(fields) == 0 {
+			return fmt.Errorf("pass --max-runtime, --idle-stop or both (off turns one off)")
+		}
+
+		client, err := loadClient()
+		if err != nil {
+			return err
+		}
+		id, err := resolveInstanceID(client, args[0])
+		if err != nil {
+			return err
+		}
+		instance, err := client.UpdateInstanceAutoStop(id, fields)
+		if err != nil {
+			return fmt.Errorf("changing auto stop: %w", err)
+		}
+
+		if jsonOutput {
+			return printJSON(instance)
+		}
+		fmt.Println()
+		fmt.Printf("  Name:         %s\n", instance.Name)
+		fmt.Printf("  Max runtime:  %s\n", formatOptionalMinutes(instance.MaxRuntimeMinutes))
+		fmt.Printf("  Idle stop:    %s\n", formatOptionalMinutes(instance.IdleShutdownMinutes))
+		if instance.AutoStopAt != nil {
+			fmt.Printf("  Auto stop at: %s\n", *instance.AutoStopAt)
+		}
+		fmt.Println()
+		return nil
+	},
+}
+
 // ── status ──────────────────────────────────────────────────────────────────
 
 var instancesStatusCmd = &cobra.Command{
@@ -512,11 +589,18 @@ func init() {
 	instancesCreateCmd.Flags().String("idle-stop", "",
 		"Stop the instance after this long with GPU use under 5% and nobody connected (SSH, web terminal or editor), 5m to 24h (e.g. 30m), GPU instances only. Recommended for unattended work")
 
+	// auto-stop
+	instancesAutoStopCmd.Flags().String("max-runtime", "",
+		"Total time the instance may run, counted from when it started, 5m to 168h (e.g. 8h), or off")
+	instancesAutoStopCmd.Flags().String("idle-stop", "",
+		"Stop after this long with GPU use under 5% and nobody connected, 5m to 24h (e.g. 30m), or off")
+
 	// Wire subcommands
 	instancesCmd.AddCommand(instancesListCmd)
 	instancesCmd.AddCommand(instancesTypesCmd)
 	instancesCmd.AddCommand(instancesCreateCmd)
 	instancesCmd.AddCommand(instancesInfoCmd)
+	instancesCmd.AddCommand(instancesAutoStopCmd)
 	instancesCmd.AddCommand(instancesStatusCmd)
 	instancesCmd.AddCommand(instancesDeleteCmd)
 	rootCmd.AddCommand(instancesCmd)

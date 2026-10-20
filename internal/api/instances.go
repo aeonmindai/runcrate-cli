@@ -243,6 +243,32 @@ func (c *Client) CreateInstance(req CreateInstanceRequest) (*Instance, error) {
 	return &result.Data, nil
 }
 
+// UpdateInstanceAutoStop changes a live instance's auto stop. Only the keys present
+// in fields are sent ("max_runtime_minutes", "idle_shutdown_minutes"); a nil value
+// sends null, which turns that limit off.
+func (c *Client) UpdateInstanceAutoStop(id string, fields map[string]*int) (*Instance, error) {
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	resp, err := c.do("PATCH", "/api/v1/instances/"+id, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("network error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkHTTPStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var result apiEnvelope[Instance]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+	return &result.Data, nil
+}
+
 // DeleteInstance terminates an instance.
 func (c *Client) DeleteInstance(id string) error {
 	resp, err := c.do("DELETE", "/api/v1/instances/"+id, nil)
