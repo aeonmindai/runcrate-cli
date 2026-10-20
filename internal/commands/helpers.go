@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -41,7 +42,12 @@ func loadClient() (*api.Client, error) {
 
 // newTable creates a tabwriter for formatted table output.
 func newTable() *tabwriter.Writer {
-	return tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	return newTableTo(os.Stdout)
+}
+
+// newTableTo is newTable writing to w.
+func newTableTo(w io.Writer) *tabwriter.Writer {
+	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }
 
 // printJSON outputs data as indented JSON.

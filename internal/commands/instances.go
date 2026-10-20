@@ -237,6 +237,62 @@ var instancesTypesCmd = &cobra.Command{
 
 // ── create ──────────────────────────────────────────────────────────────────
 
+// addInstanceOnlyFlags registers the create flags that only an instance takes,
+// shared by instances create and schedule create.
+func addInstanceOnlyFlags(cmd *cobra.Command) {
+	cmd.Flags().String("type-id", "", "Instance type ID from 'runcrate instances types'")
+	cmd.Flags().String("idle-stop", "",
+		"Stop the instance after this long with GPU use under 5% and nobody connected (SSH, web terminal or editor), 5m to 24h (e.g. 30m), GPU instances only. Recommended for unattended work")
+}
+
+// buildInstanceRequest turns the create flags (name, gpu, gpu-count, region,
+// template, type-id, volume, max-runtime, idle-stop) into the create body.
+func buildInstanceRequest(cmd *cobra.Command) (api.CreateInstanceRequest, error) {
+	var req api.CreateInstanceRequest
+	name, _ := cmd.Flags().GetString("name")
+	gpuRaw, _ := cmd.Flags().GetString("gpu")
+	gpuCountRaw, _ := cmd.Flags().GetInt("gpu-count")
+	region, _ := cmd.Flags().GetString("region")
+	template, _ := cmd.Flags().GetString("template")
+	typeID, _ := cmd.Flags().GetString("type-id")
+	volumeID, _ := cmd.Flags().GetString("volume")
+	maxRuntimeRaw, _ := cmd.Flags().GetString("max-runtime")
+	idleStopRaw, _ := cmd.Flags().GetString("idle-stop")
+
+	maxRuntime, err := parseMinutesFlag("max-runtime", maxRuntimeRaw, maxRuntimeMaxMinutes)
+	if err != nil {
+		return req, err
+	}
+	idleStop, err := parseMinutesFlag("idle-stop", idleStopRaw, idleStopMaxMinutes)
+	if err != nil {
+		return req, err
+	}
+
+	gpuType, gpuCount, err := parseGPUFlag(gpuRaw, gpuCountRaw, cmd.Flags().Changed("gpu-count"))
+	if err != nil {
+		return req, err
+	}
+
+	if name == "" {
+		return req, fmt.Errorf("--name is required")
+	}
+	if gpuType == "" && typeID == "" {
+		return req, fmt.Errorf("provide --gpu for auto-deploy or --type-id from 'runcrate instances types'")
+	}
+
+	return api.CreateInstanceRequest{
+		Name:                name,
+		GPUType:             gpuType,
+		GPUCount:            gpuCount,
+		Region:              region,
+		Template:            template,
+		InstanceTypeID:      typeID,
+		MaxRuntimeMinutes:   maxRuntime,
+		IdleShutdownMinutes: idleStop,
+		StorageID:           volumeID,
+	}, nil
+}
+
 var instancesCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create and deploy a new instance",
@@ -247,36 +303,11 @@ does not keep billing after the job ends. Auto stop terminates the instance, so 
 anything you need on a storage volume.`,
 	Example: "  runcrate instances create --name train --gpu H100 --max-runtime 4h --idle-stop 30m",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name, _ := cmd.Flags().GetString("name")
-		gpuRaw, _ := cmd.Flags().GetString("gpu")
-		gpuCountRaw, _ := cmd.Flags().GetInt("gpu-count")
-		region, _ := cmd.Flags().GetString("region")
-		template, _ := cmd.Flags().GetString("template")
-		typeID, _ := cmd.Flags().GetString("type-id")
-		volumeID, _ := cmd.Flags().GetString("volume")
-		maxRuntimeRaw, _ := cmd.Flags().GetString("max-runtime")
-		idleStopRaw, _ := cmd.Flags().GetString("idle-stop")
-
-		maxRuntime, err := parseMinutesFlag("max-runtime", maxRuntimeRaw, maxRuntimeMaxMinutes)
+		req, err := buildInstanceRequest(cmd)
 		if err != nil {
 			return err
 		}
-		idleStop, err := parseMinutesFlag("idle-stop", idleStopRaw, idleStopMaxMinutes)
-		if err != nil {
-			return err
-		}
-
-		gpuType, gpuCount, err := parseGPUFlag(gpuRaw, gpuCountRaw, cmd.Flags().Changed("gpu-count"))
-		if err != nil {
-			return err
-		}
-
-		if name == "" {
-			return fmt.Errorf("--name is required")
-		}
-		if gpuType == "" && typeID == "" {
-			return fmt.Errorf("provide --gpu for auto-deploy or --type-id from 'runcrate instances types'")
-		}
+		volumeID := req.StorageID
 
 		client, err := loadClient()
 		if err != nil {
@@ -286,21 +317,9 @@ anything you need on a storage volume.`,
 		// Check for duplicate active instance name
 		existing, _ := client.ListInstances("")
 		for _, inst := range existing {
-			if strings.EqualFold(inst.Name, name) && isActiveInstance(inst.Status) {
-				return fmt.Errorf("instance %q already exists (ID: %s, status: %s). Use a different name or delete it first", name, inst.ID, inst.Status)
+			if strings.EqualFold(inst.Name, req.Name) && isActiveInstance(inst.Status) {
+				return fmt.Errorf("instance %q already exists (ID: %s, status: %s). Use a different name or delete it first", req.Name, inst.ID, inst.Status)
 			}
-		}
-
-		req := api.CreateInstanceRequest{
-			Name:                name,
-			GPUType:             gpuType,
-			GPUCount:            gpuCount,
-			Region:              region,
-			Template:            template,
-			InstanceTypeID:      typeID,
-			MaxRuntimeMinutes:   maxRuntime,
-			IdleShutdownMinutes: idleStop,
-			StorageID:           volumeID,
 		}
 
 		instance, err := client.CreateInstance(req)
@@ -588,12 +607,10 @@ func init() {
 	instancesCreateCmd.Flags().Int("gpu-count", 1, "Number of GPUs (alternative to colon syntax)")
 	instancesCreateCmd.Flags().String("region", "", "Preferred region")
 	instancesCreateCmd.Flags().String("template", "", "OS template")
-	instancesCreateCmd.Flags().String("type-id", "", "Instance type ID from 'runcrate instances types'")
 	instancesCreateCmd.Flags().String("volume", "", "Storage volume ID to attach, from 'runcrate volumes list'; its files are at /workspace")
 	instancesCreateCmd.Flags().String("max-runtime", "",
 		"Stop the instance automatically after this long, 5m to 168h (e.g. 4h). Recommended for unattended work")
-	instancesCreateCmd.Flags().String("idle-stop", "",
-		"Stop the instance after this long with GPU use under 5% and nobody connected (SSH, web terminal or editor), 5m to 24h (e.g. 30m), GPU instances only. Recommended for unattended work")
+	addInstanceOnlyFlags(instancesCreateCmd)
 
 	// auto-stop
 	instancesAutoStopCmd.Flags().String("max-runtime", "",

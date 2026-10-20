@@ -99,7 +99,15 @@ func parseEnvFlags(vals []string, lookup func(string) (string, bool)) (map[strin
 	return env, nil
 }
 
-// buildJobRequest turns run's flags and arguments into the create body.
+// addJobOnlyFlags registers the flags that only a job takes, shared by run and
+// schedule create.
+func addJobOnlyFlags(cmd *cobra.Command) {
+	cmd.Flags().String("image", "", "Container image to run the command in")
+	cmd.Flags().StringArray("env", nil, "Environment variable KEY=VALUE, or KEY to copy it from your shell (repeatable)")
+}
+
+// buildJobRequest turns the job flags (gpu, gpu-count, max-runtime, volume,
+// image, env, template, name, region) and the command into the create body.
 func buildJobRequest(cmd *cobra.Command, args []string, lookupEnv func(string) (string, bool)) (api.CreateJobRequest, error) {
 	var req api.CreateJobRequest
 
@@ -168,8 +176,7 @@ running.`,
 	cmd.Flags().String("volume", "", "Volume ID to mount as /workspace")
 	cmd.Flags().String("max-runtime", formatMinutes(defaultMaxRuntimeMinutes), "Stop the job after this long: 90m, 2h, or minutes (1m to 24h)")
 	cmd.Flags().String("template", "", "OS template (default ubuntu-devbox)")
-	cmd.Flags().String("image", "", "Container image to run the command in")
-	cmd.Flags().StringArray("env", nil, "Environment variable KEY=VALUE, or KEY to copy it from your shell (repeatable)")
+	addJobOnlyFlags(cmd)
 	cmd.Flags().String("name", "", "Job name (default job-<id>)")
 	cmd.Flags().String("region", "", "Preferred region")
 	cmd.Flags().BoolP("detach", "d", false, "Print the job ID and return without following its output")

@@ -78,6 +78,39 @@ runcrate jobs cancel <id>
   own code, 124 on timeout, 130 when cancelled. Ctrl-C detaches and leaves the job
   running; `-d` / `--detach` prints the job ID and returns.
 
+## Schedules
+
+A schedule starts an instance or a job later: once with `--at`, or on a recurring
+5-field `--cron`. A command after `--` makes it a job (same flags as `runcrate run`);
+without one it starts an instance (same flags as `runcrate instances create`, so
+`--name` is required). `--max-runtime` is required for both, so nothing a schedule
+starts keeps running unattended.
+
+```bash
+runcrate schedule create --cron '0 2 * * *' --tz Europe/London --name nightly-train \
+  --gpu H100 --volume <volume-id> --max-runtime 2h -- python train.py
+runcrate schedule create --at '2026-10-21 09:00' --name morning-box \
+  --gpu A4000 --max-runtime 8h --idle-stop 30m
+runcrate schedule list [-q] [--json]   # when, next run (your local time), last result
+runcrate schedule get <id>             # details, last run, last error
+runcrate schedule pause <id>           # resume <id> turns it back on
+runcrate schedule run-now <id>         # start it now; the next run stays as it is
+runcrate schedule delete <id> [--yes]  # what it already started keeps running
+```
+
+- `--at '2026-10-21 02:00'` is the wall time in `--tz`; a time with an offset
+  (`2026-10-21T02:00:00+01:00`) is used as is. `--tz` takes an IANA name and
+  defaults to this machine's timezone, for `--cron` too.
+- Across daylight saving: a time the clocks skip moves forward by the gap (02:30
+  becomes 03:30), and a time that happens twice runs the first time.
+- Recurring runs are at least 15 minutes apart. `--overlap skip` (the default)
+  skips a run while the previous one is still going; `--overlap allow` starts it.
+- Runs start within about 2 minutes of their time, as you, in the current
+  environment. While the environment's monthly budget is reached, runs are skipped.
+- A schedule set up with an API key or an agent sign-in launches with it; when
+  that key is revoked or the sign-in ends, the schedule pauses (last result
+  `paused: key revoked`).
+
 ## Updating
 
 ```bash
