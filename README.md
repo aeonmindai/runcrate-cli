@@ -32,6 +32,19 @@ runcrate ssh my-gpu -- nvidia-smi
 runcrate cp ./train.py my-gpu:/root/workspace/
 ```
 
+For unattended or agent-run work, give the instance an auto stop so it does not keep
+billing after the job ends. Durations are whole minutes written like `30m`, `4h` or
+`1h30m`. `--max-runtime` accepts 5m to 168h, `--idle-stop` accepts 5m to 24h (idle
+means GPU use under 5% and nobody connected over SSH, the web terminal or the editor; GPU instances only). Auto stop terminates the instance.
+
+```bash
+runcrate instances create --name train --gpu H100 --max-runtime 4h --idle-stop 30m
+runcrate instances info train   # Max runtime, Idle stop, Auto stop at, Stop reason
+
+# Extend it before a long job (total time from start), or turn a limit off
+runcrate instances auto-stop train --max-runtime 8h --idle-stop off
+```
+
 Point the CLI at a different API origin with `runcrate config set url <url>` or the
 `RUNCRATE_API_URL` env var (defaults to `https://runcrate.ai`).
 
