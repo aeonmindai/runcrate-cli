@@ -27,14 +27,19 @@ type Schedule struct {
 	Enabled           bool           `json:"enabled"`
 	NextRunAt         *string        `json:"next_run_at"`
 	LastRunAt         *string        `json:"last_run_at"`
-	// LastStatus is launched, failed, skipped_budget, skipped_overlap or no_access.
-	LastStatus     *string `json:"last_status"`
-	LastError      *string `json:"last_error"`
-	LastInstanceID *string `json:"last_instance_id"`
-	LastJobID      *string `json:"last_job_id"`
-	RunCount       int     `json:"run_count"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	// LastStatus is launched, failed, skipped_budget, skipped_overlap,
+	// no_access or credential_revoked.
+	LastStatus *string `json:"last_status"`
+	LastError  *string `json:"last_error"`
+	// RunAs is the user each run launches as; RunAsCredential is how the
+	// schedule was set up: user, api_key or agent.
+	RunAs           *string `json:"run_as"`
+	RunAsCredential string  `json:"run_as_credential"`
+	LastInstanceID  *string `json:"last_instance_id"`
+	LastJobID       *string `json:"last_job_id"`
+	RunCount        int     `json:"run_count"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 // CreateScheduleRequest is the body of POST /api/v1/schedules. Spec is a

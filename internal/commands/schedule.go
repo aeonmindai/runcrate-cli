@@ -358,8 +358,24 @@ func scheduleLastResult(s *api.Schedule) string {
 		return "skipped: still running"
 	case "no_access":
 		return "no access"
+	case "credential_revoked":
+		return "paused: key revoked"
 	default:
 		return *s.LastStatus
+	}
+}
+
+// runAsCredentialText says what the schedule's runs launch with.
+func runAsCredentialText(credential string) string {
+	switch credential {
+	case "user":
+		return "its creator's account"
+	case "api_key":
+		return "the API key it was created with"
+	case "agent":
+		return "the agent sign-in it was created with"
+	default:
+		return credential
 	}
 }
 
@@ -493,6 +509,9 @@ var scheduleGetCmd = &cobra.Command{
 		}
 		if s.LastJobID != nil {
 			fmt.Printf("  Last job:     %s\n", *s.LastJobID)
+		}
+		if s.RunAsCredential != "" {
+			fmt.Printf("  Runs as:      %s\n", runAsCredentialText(s.RunAsCredential))
 		}
 		fmt.Printf("  Runs:         %d\n", s.RunCount)
 		fmt.Printf("  Created:      %s\n", s.CreatedAt)

@@ -300,13 +300,17 @@ func TestRenderScheduleTable(t *testing.T) {
 			ID: "sch-2", Name: "morning-box", Kind: "instance", RunAt: strp("2026-10-21T08:00:00Z"), Timezone: "America/New_York",
 			Enabled: false,
 		},
+		{
+			ID: "sch-3", Name: "agent-eval", Kind: "job", Cron: strp("0 * * * *"), Timezone: "UTC",
+			Enabled: false, LastStatus: strp("credential_revoked"), RunAsCredential: "api_key",
+		},
 	}
 	var out bytes.Buffer
 	if err := renderScheduleTable(&out, list, london); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
-	if len(lines) != 3 {
+	if len(lines) != 4 {
 		t.Fatalf("got %d lines:\n%s", len(lines), out.String())
 	}
 	header := strings.Fields(lines[0])
@@ -323,6 +327,10 @@ func TestRenderScheduleTable(t *testing.T) {
 		if !strings.Contains(lines[2], want) {
 			t.Errorf("row 2 %q is missing %q", lines[2], want)
 		}
+	}
+	// Paused because the API key it was created with was revoked.
+	if !strings.Contains(lines[3], "paused: key revoked") {
+		t.Errorf("row 3 %q does not say the key was revoked", lines[3])
 	}
 }
 
