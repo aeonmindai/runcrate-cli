@@ -45,10 +45,6 @@ func parseMaxRuntime(s string) (int, error) {
 }
 
 // formatMinutes renders whole minutes as 45m, 1h0m, 1h30m.
-func formatMinutes(m int) string {
-	return strings.TrimSuffix((time.Duration(m) * time.Minute).String(), "0s")
-}
-
 // shellSafe matches arguments that mean the same thing quoted or not.
 var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
 
