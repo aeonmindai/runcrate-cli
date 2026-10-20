@@ -85,6 +85,8 @@ jobs:
       # checksums. Needs a HOMEBREW_TAP_TOKEN secret that can dispatch to that repo; without
       # it the step is skipped and the tap's six-hourly sync picks the release up instead.
       - name: Update Homebrew tap
+        # The release is already published; a bad token or API hiccup must not turn it red.
+        continue-on-error: true
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ steps.version.outputs.version }}
@@ -93,7 +95,7 @@ jobs:
             echo "HOMEBREW_TAP_TOKEN not set; the tap's scheduled sync will pick up ${TAG}."
             exit 0
           fi
-          curl -fsS -X POST \
+          curl -fsS --retry 3 -X POST \
             -H "Authorization: Bearer ${TAP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/aeonmindai/homebrew-tap/dispatches \
