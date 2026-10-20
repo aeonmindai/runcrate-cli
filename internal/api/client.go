@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,9 +21,28 @@ type Client struct {
 	httpClient  *http.Client
 }
 
+// APIError is a non-2xx response from the v1 API. Status is the HTTP status code;
+// Code and Message come from the { error: { code, message } } envelope when present.
 type APIError struct {
+	Status  int    `json:"-"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+func (e *APIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
+	}
+	return fmt.Sprintf("API error (HTTP %d)", e.Status)
+}
+
+// IsBudgetReached reports whether err is the 402 BUDGET_REACHED returned when the
+// environment has used its monthly budget.
+func IsBudgetReached(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) &&
+		apiErr.Status == http.StatusPaymentRequired &&
+		strings.EqualFold(apiErr.Code, "BUDGET_REACHED")
 }
 
 type errorEnvelope struct {

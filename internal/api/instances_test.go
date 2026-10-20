@@ -244,3 +244,86 @@ func TestGetSSHCertificate(t *testing.T) {
 		t.Error("certificate is empty")
 	}
 }
+
+func TestCreateInstance_AutoStopFields(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"data":{"id":"inst-new","max_runtime_minutes":240,"idle_shutdown_minutes":null,` +
+			`"auto_stop_at":"2026-10-20T16:00:00.000Z","stop_reason":null}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	maxRuntime := 240
+	inst, err := client.CreateInstance(CreateInstanceRequest{Name: "a", GPUType: "H100", MaxRuntimeMinutes: &maxRuntime})
+	if err != nil {
+		t.Fatalf("CreateInstance() error: %v", err)
+	}
+	if _, err := client.CreateInstance(CreateInstanceRequest{Name: "b", GPUType: "H100"}); err != nil {
+		t.Fatalf("CreateInstance() error: %v", err)
+	}
+
+	if got := bodies[0]["max_runtime_minutes"]; got != float64(240) {
+		t.Errorf("max_runtime_minutes sent = %v, want 240", got)
+	}
+	if _, ok := bodies[0]["idle_shutdown_minutes"]; ok {
+		t.Error("idle_shutdown_minutes sent although unset")
+	}
+	for _, key := range []string{"max_runtime_minutes", "idle_shutdown_minutes"} {
+		if _, ok := bodies[1][key]; ok {
+			t.Errorf("%s sent although unset", key)
+		}
+	}
+
+	if inst.MaxRuntimeMinutes == nil || *inst.MaxRuntimeMinutes != 240 {
+		t.Errorf("MaxRuntimeMinutes = %v, want 240", inst.MaxRuntimeMinutes)
+	}
+	if inst.IdleShutdownMinutes != nil {
+		t.Errorf("IdleShutdownMinutes = %v, want nil", *inst.IdleShutdownMinutes)
+	}
+	if inst.AutoStopAt == nil || *inst.AutoStopAt != "2026-10-20T16:00:00.000Z" {
+		t.Errorf("AutoStopAt = %v, want 2026-10-20T16:00:00.000Z", inst.AutoStopAt)
+	}
+	if inst.StopReason != nil {
+		t.Errorf("StopReason = %q, want nil", *inst.StopReason)
+	}
+}
+
+func TestIsBudgetReached(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"budget reached", http.StatusPaymentRequired,
+			`{"error":{"code":"BUDGET_REACHED","message":"Environment budget reached"}}`, true},
+		{"budget reached lowercase code", http.StatusPaymentRequired,
+			`{"error":{"code":"budget_reached","message":"Environment budget reached"}}`, true},
+		{"low balance is a different 402", http.StatusPaymentRequired,
+			`{"error":{"code":"insufficient_credits","message":"Add credits"}}`, false},
+		{"other error", http.StatusBadRequest,
+			`{"error":{"code":"bad_request","message":"max_runtime_minutes must be between 5 and 10080"}}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			_, err := NewClient("rc_live_test", server.URL).CreateInstance(CreateInstanceRequest{Name: "a"})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if got := IsBudgetReached(err); got != tt.want {
+				t.Errorf("IsBudgetReached(%v) = %v, want %v", err, got, tt.want)
+			}
+		})
+	}
+}
