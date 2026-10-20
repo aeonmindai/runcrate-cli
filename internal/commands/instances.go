@@ -163,6 +163,7 @@ var instancesCreateCmd = &cobra.Command{
 		region, _ := cmd.Flags().GetString("region")
 		template, _ := cmd.Flags().GetString("template")
 		typeID, _ := cmd.Flags().GetString("type-id")
+		volumeID, _ := cmd.Flags().GetString("volume")
 
 		gpuType, gpuCount, err := parseGPUFlag(gpuRaw, gpuCountRaw, cmd.Flags().Changed("gpu-count"))
 		if err != nil {
@@ -191,6 +192,7 @@ var instancesCreateCmd = &cobra.Command{
 			Region:         region,
 			Template:       template,
 			InstanceTypeID: typeID,
+			StorageID:      volumeID,
 		}
 
 		instance, err := client.CreateInstance(req)
@@ -211,6 +213,9 @@ var instancesCreateCmd = &cobra.Command{
 		fmt.Printf("  Instance queued: %s (%s)\n", instance.Name, gpu)
 		fmt.Printf("  ID:    %s\n", instance.ID)
 		fmt.Printf("  Cost:  $%.2f/hr\n", instance.CostPerHour)
+		if volumeID != "" {
+			fmt.Printf("  Volume: %s, at /workspace\n", volumeID)
+		}
 		fmt.Println()
 		fmt.Println("  Provisioning in the background. Track with:")
 		fmt.Printf("    runcrate instances status %s\n", instance.Name)
@@ -398,6 +403,7 @@ func init() {
 	instancesCreateCmd.Flags().String("region", "", "Preferred region")
 	instancesCreateCmd.Flags().String("template", "", "OS template")
 	instancesCreateCmd.Flags().String("type-id", "", "Instance type ID from 'runcrate instances types'")
+	instancesCreateCmd.Flags().String("volume", "", "Storage volume ID to attach, from 'runcrate volumes list'; its files are at /workspace")
 
 	// Wire subcommands
 	instancesCmd.AddCommand(instancesListCmd)
