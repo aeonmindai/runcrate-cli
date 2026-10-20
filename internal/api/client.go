@@ -32,6 +32,9 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	if e.Status == http.StatusPaymentRequired && strings.EqualFold(e.Code, "BUDGET_REACHED") {
+		return "this environment's monthly budget is reached; an owner or admin can raise it in the dashboard (HTTP 402)"
+	}
 	if e.Message != "" {
 		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
 	}
