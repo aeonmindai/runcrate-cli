@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,12 +25,16 @@ type Client struct {
 // APIError is a non-2xx response from the v1 API. Status is the HTTP status code;
 // Code and Message come from the { error: { code, message } } envelope when present.
 type APIError struct {
-	Status  int    `json:"-"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Status  int            `json:"-"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 func (e *APIError) Error() string {
+	if e.Status == http.StatusPaymentRequired && strings.EqualFold(e.Code, "BUDGET_REACHED") {
+		return "this environment's monthly budget is reached; an owner or admin can raise it in the dashboard (HTTP 402)"
+	}
 	if e.Message != "" {
 		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
 	}
@@ -72,8 +77,14 @@ func NewOAuthClient(baseURL, accessToken, projectID, environment string) *Client
 }
 
 func (c *Client) do(method, path string, body io.Reader) (*http.Response, error) {
+	return c.doCtx(context.Background(), method, path, body)
+}
+
+// doCtx is do with a request context, for calls that can be cancelled or need
+// a deadline other than the client's default timeout.
+func (c *Client) doCtx(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.baseURL + path
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}
