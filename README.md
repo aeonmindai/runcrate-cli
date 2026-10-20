@@ -35,6 +35,30 @@ runcrate cp ./train.py my-gpu:/root/workspace/
 Point the CLI at a different API origin with `runcrate config set url <url>` or the
 `RUNCRATE_API_URL` env var (defaults to `https://runcrate.ai`).
 
+## Jobs
+
+A job runs one command on its own GPU machine, streams its output, and stops the
+machine (and its billing) when the command ends.
+
+```bash
+runcrate run --gpu A4000 -- nvidia-smi
+runcrate run --gpu H100 --volume <volume-id> --max-runtime 2h -- python train.py --epochs 3
+runcrate run --gpu A4000 --env HF_TOKEN -d -- 'pip install -r requirements.txt && python eval.py'
+runcrate jobs list [--status running,queued] [--limit 20] [-q] [--json]
+runcrate jobs status <id>      # exit code, error, cost, instance, env keys
+runcrate jobs logs <id> [-f]   # print output; -f follows until the job ends
+runcrate jobs cancel <id>
+```
+
+- The command runs with bash in `/workspace`, which holds the volume's files when
+  `--volume` is set; files written there are copied back when the machine stops.
+- `--max-runtime` takes `90m`, `2h`, `1h30m` or minutes, from 1m to 24h (default 1h).
+- `--env KEY=VALUE` is repeatable; `--env KEY` copies the value from your shell.
+  Values are never stored or shown.
+- `runcrate run` and `runcrate jobs logs -f` exit with the job's code: the command's
+  own code, 124 on timeout, 130 when cancelled. Ctrl-C detaches and leaves the job
+  running; `-d` / `--detach` prints the job ID and returns.
+
 ## Updating
 
 ```bash

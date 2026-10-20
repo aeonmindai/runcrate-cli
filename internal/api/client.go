@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,8 +53,14 @@ func NewOAuthClient(baseURL, accessToken, projectID, environment string) *Client
 }
 
 func (c *Client) do(method, path string, body io.Reader) (*http.Response, error) {
+	return c.doCtx(context.Background(), method, path, body)
+}
+
+// doCtx is do with a request context, for calls that can be cancelled or need
+// a deadline other than the client's default timeout.
+func (c *Client) doCtx(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.baseURL + path
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}

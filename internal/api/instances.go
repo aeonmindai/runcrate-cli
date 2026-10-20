@@ -98,7 +98,25 @@ func (c *Client) GetSSHCertificate(instanceID, publicKey string) (*SSHCertificat
 	return &result.Data, nil
 }
 
-// checkHTTPStatus returns a formatted error for non-2xx responses.
+// StatusError is a non-2xx v1 response: `{ "error": { "code", "message", "details"? } }`.
+type StatusError struct {
+	StatusCode int
+	Code       string
+	Message    string
+	Details    map[string]any
+}
+
+func (e *StatusError) Error() string {
+	if e.StatusCode == http.StatusPaymentRequired && e.Code == "BUDGET_REACHED" {
+		return "this environment's monthly budget is reached; an owner or admin can raise it in the dashboard (HTTP 402)"
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.StatusCode)
+	}
+	return fmt.Sprintf("API error (HTTP %d)", e.StatusCode)
+}
+
+// checkHTTPStatus returns a *StatusError for non-2xx responses.
 func checkHTTPStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
@@ -106,14 +124,18 @@ func checkHTTPStatus(resp *http.Response) error {
 
 	var errResp struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
 		} `json:"error"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&errResp) == nil && errResp.Error.Message != "" {
-		return fmt.Errorf("%s (HTTP %d)", errResp.Error.Message, resp.StatusCode)
+	e := &StatusError{StatusCode: resp.StatusCode}
+	if json.NewDecoder(resp.Body).Decode(&errResp) == nil {
+		e.Code = errResp.Error.Code
+		e.Message = errResp.Error.Message
+		e.Details = errResp.Error.Details
 	}
-	return fmt.Errorf("API error (HTTP %d)", resp.StatusCode)
+	return e
 }
 
 // ListInstances returns all instances for the authenticated user.
