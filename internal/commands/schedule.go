@@ -365,17 +365,21 @@ func scheduleLastResult(s *api.Schedule) string {
 	}
 }
 
-// runAsCredentialText says what the schedule's runs launch with.
-func runAsCredentialText(credential string) string {
-	switch credential {
+// scheduleRunsAs is the user each run launches as and how: the last person to
+// set up, retime or resume the schedule. Empty when the API sent no run_as.
+func scheduleRunsAs(s *api.Schedule) string {
+	if s.RunAs == nil || *s.RunAs == "" {
+		return ""
+	}
+	switch s.RunAsCredential {
 	case "user":
-		return "its creator's account"
+		return *s.RunAs + " (signed in)"
 	case "api_key":
-		return "the API key it was created with"
+		return *s.RunAs + " through an API key"
 	case "agent":
-		return "the agent sign-in it was created with"
+		return *s.RunAs + " through an agent sign-in"
 	default:
-		return credential
+		return *s.RunAs
 	}
 }
 
@@ -510,8 +514,8 @@ var scheduleGetCmd = &cobra.Command{
 		if s.LastJobID != nil {
 			fmt.Printf("  Last job:     %s\n", *s.LastJobID)
 		}
-		if s.RunAsCredential != "" {
-			fmt.Printf("  Runs as:      %s\n", runAsCredentialText(s.RunAsCredential))
+		if runsAs := scheduleRunsAs(s); runsAs != "" {
+			fmt.Printf("  Runs as:      %s\n", runsAs)
 		}
 		fmt.Printf("  Runs:         %d\n", s.RunCount)
 		fmt.Printf("  Created:      %s\n", s.CreatedAt)

@@ -328,9 +328,25 @@ func TestRenderScheduleTable(t *testing.T) {
 			t.Errorf("row 2 %q is missing %q", lines[2], want)
 		}
 	}
-	// Paused because the API key it was created with was revoked.
+	// Paused because the API key it was set up with was revoked.
 	if !strings.Contains(lines[3], "paused: key revoked") {
 		t.Errorf("row 3 %q does not say the key was revoked", lines[3])
+	}
+}
+
+func TestScheduleRunsAs(t *testing.T) {
+	for cred, want := range map[string]string{
+		"user":    "u-1 (signed in)",
+		"api_key": "u-1 through an API key",
+		"agent":   "u-1 through an agent sign-in",
+	} {
+		s := &api.Schedule{RunAs: strp("u-1"), RunAsCredential: cred}
+		if got := scheduleRunsAs(s); got != want {
+			t.Errorf("%s: %q, want %q", cred, got, want)
+		}
+	}
+	if got := scheduleRunsAs(&api.Schedule{RunAsCredential: "user"}); got != "" {
+		t.Errorf("no run_as: %q, want empty", got)
 	}
 }
 

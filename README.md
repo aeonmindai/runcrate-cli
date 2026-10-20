@@ -107,7 +107,7 @@ runcrate schedule delete <id> [--yes]  # what it already started keeps running
   skips a run while the previous one is still going; `--overlap allow` starts it.
 - Runs start within about 2 minutes of their time, as you, in the current
   environment. While the environment's monthly budget is reached, runs are skipped.
-- A schedule created with an API key or an agent sign-in launches with it; when
+- A schedule set up with an API key or an agent sign-in launches with it; when
   that key is revoked or the sign-in ends, the schedule pauses (last result
   `paused: key revoked`).
 
