@@ -35,7 +35,7 @@ runcrate cp ./train.py my-gpu:/root/workspace/
 For unattended or agent-run work, give the instance an auto stop so it does not keep
 billing after the job ends. Durations are whole minutes written like `30m`, `4h` or
 `1h30m`. `--max-runtime` accepts 5m to 168h, `--idle-stop` accepts 5m to 24h (idle
-means GPU use under 5% and no SSH session). Auto stop terminates the instance.
+means GPU use under 5% and nobody connected over SSH, the web terminal or the editor; GPU instances only). Auto stop terminates the instance.
 
 ```bash
 runcrate instances create --name train --gpu H100 --max-runtime 4h --idle-stop 30m

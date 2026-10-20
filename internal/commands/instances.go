@@ -510,7 +510,7 @@ func init() {
 	instancesCreateCmd.Flags().String("max-runtime", "",
 		"Stop the instance automatically after this long, 5m to 168h (e.g. 4h). Recommended for unattended work")
 	instancesCreateCmd.Flags().String("idle-stop", "",
-		"Stop the instance after this long with GPU use under 5% and no SSH session, 5m to 24h (e.g. 30m). Recommended for unattended work")
+		"Stop the instance after this long with GPU use under 5% and nobody connected (SSH, web terminal or editor), 5m to 24h (e.g. 30m), GPU instances only. Recommended for unattended work")
 
 	// Wire subcommands
 	instancesCmd.AddCommand(instancesListCmd)
