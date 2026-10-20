@@ -253,6 +253,7 @@ anything you need on a storage volume.`,
 		region, _ := cmd.Flags().GetString("region")
 		template, _ := cmd.Flags().GetString("template")
 		typeID, _ := cmd.Flags().GetString("type-id")
+		volumeID, _ := cmd.Flags().GetString("volume")
 		maxRuntimeRaw, _ := cmd.Flags().GetString("max-runtime")
 		idleStopRaw, _ := cmd.Flags().GetString("idle-stop")
 
@@ -299,6 +300,7 @@ anything you need on a storage volume.`,
 			InstanceTypeID:      typeID,
 			MaxRuntimeMinutes:   maxRuntime,
 			IdleShutdownMinutes: idleStop,
+			StorageID:           volumeID,
 		}
 
 		instance, err := client.CreateInstance(req)
@@ -324,6 +326,9 @@ anything you need on a storage volume.`,
 		fmt.Printf("  Cost:        $%.2f/hr\n", instance.CostPerHour)
 		fmt.Printf("  Max runtime: %s\n", formatOptionalMinutes(instance.MaxRuntimeMinutes))
 		fmt.Printf("  Idle stop:   %s\n", formatOptionalMinutes(instance.IdleShutdownMinutes))
+		if volumeID != "" {
+			fmt.Printf("  Volume:      %s, at /workspace\n", volumeID)
+		}
 		fmt.Println()
 		fmt.Println("  Provisioning in the background. Track with:")
 		fmt.Printf("    runcrate instances status %s\n", instance.Name)
@@ -584,6 +589,7 @@ func init() {
 	instancesCreateCmd.Flags().String("region", "", "Preferred region")
 	instancesCreateCmd.Flags().String("template", "", "OS template")
 	instancesCreateCmd.Flags().String("type-id", "", "Instance type ID from 'runcrate instances types'")
+	instancesCreateCmd.Flags().String("volume", "", "Storage volume ID to attach, from 'runcrate volumes list'; its files are at /workspace")
 	instancesCreateCmd.Flags().String("max-runtime", "",
 		"Stop the instance automatically after this long, 5m to 168h (e.g. 4h). Recommended for unattended work")
 	instancesCreateCmd.Flags().String("idle-stop", "",

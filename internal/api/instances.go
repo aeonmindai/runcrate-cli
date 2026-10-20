@@ -62,6 +62,7 @@ type CreateInstanceRequest struct {
 	SSHKeyID       string   `json:"ssh_key_id,omitempty"`
 	Template       string   `json:"template,omitempty"`
 	InstanceTypeID string   `json:"instance_type_id,omitempty"`
+	StorageID      string   `json:"storage_id,omitempty"`
 	EnvVars        []EnvVar `json:"env_vars,omitempty"`
 	StartupCmds    []string `json:"startup_commands,omitempty"`
 

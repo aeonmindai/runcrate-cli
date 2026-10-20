@@ -200,6 +200,35 @@ func TestCreateInstance(t *testing.T) {
 	}
 }
 
+// The API attaches a volume only when the body names it as storage_id, and leaves it out otherwise.
+func TestCreateInstanceSendsVolumeAsStorageID(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"data": Instance{ID: "inst-new"}})
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	for _, req := range []CreateInstanceRequest{
+		{Name: "with-volume", GPUType: "H100", StorageID: "vol-1"},
+		{Name: "without", GPUType: "H100"},
+	} {
+		if _, err := client.CreateInstance(req); err != nil {
+			t.Fatalf("CreateInstance(%s) error: %v", req.Name, err)
+		}
+	}
+	if got := bodies[0]["storage_id"]; got != "vol-1" {
+		t.Errorf("storage_id = %v, want vol-1", got)
+	}
+	if _, ok := bodies[1]["storage_id"]; ok {
+		t.Errorf("storage_id sent without a volume: %v", bodies[1])
+	}
+}
+
 func TestDeleteInstance(t *testing.T) {
 	server := mockInstancesServer(t)
 	defer server.Close()
