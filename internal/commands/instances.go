@@ -68,7 +68,7 @@ func formatOptionalMinutes(minutes *int) string {
 func stopReasonText(reason string) string {
 	switch reason {
 	case "user":
-		return "Stopped by you"
+		return "Stopped on request"
 	case "max_runtime":
 		return "Reached its max runtime"
 	case "idle":
