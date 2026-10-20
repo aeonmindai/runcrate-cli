@@ -1,13 +1,102 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/runcrate/cli/internal/api"
 	"github.com/spf13/cobra"
 )
+
+// Auto stop limits accepted by the API, in minutes.
+const (
+	minAutoStopMinutes   = 5
+	maxRuntimeMaxMinutes = 7 * 24 * 60 // 168h
+	idleStopMaxMinutes   = 24 * 60     // 24h
+)
+
+const budgetReachedMessage = "This environment has reached its monthly budget. " +
+	"An owner or admin can raise it in the dashboard."
+
+// parseMinutesFlag parses a duration flag such as "30m", "4h" or "1h30m" into
+// whole minutes within [minAutoStopMinutes, maxMinutes]. An empty value means the
+// flag is unset and returns nil.
+func parseMinutesFlag(flag, value string, maxMinutes int) (*int, error) {
+	if value == "" {
+		return nil, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return nil, fmt.Errorf("--%s %q is not a duration. Use a value like 30m, 4h or 1h30m", flag, value)
+	}
+	if d%time.Minute != 0 {
+		return nil, fmt.Errorf("--%s %q must be a whole number of minutes, like 30m or 1h30m", flag, value)
+	}
+	minutes := int(d / time.Minute)
+	if minutes < minAutoStopMinutes || minutes > maxMinutes {
+		return nil, fmt.Errorf("--%s must be between %s and %s, got %s",
+			flag, formatMinutes(minAutoStopMinutes), formatMinutes(maxMinutes), value)
+	}
+	return &minutes, nil
+}
+
+// parseAutoStopFlag parses an auto-stop change: "off" turns the limit off (nil),
+// anything else is a duration as for create.
+func parseAutoStopFlag(flag, value string, maxMinutes int) (*int, error) {
+	if strings.EqualFold(value, "off") {
+		return nil, nil
+	}
+	if value == "" {
+		return nil, fmt.Errorf("--%s needs a duration like 30m or 4h, or off", flag)
+	}
+	return parseMinutesFlag(flag, value, maxMinutes)
+}
+
+// formatMinutes renders minutes the way the flags accept them: 30m, 4h, 1h30m.
+func formatMinutes(minutes int) string {
+	h, m := minutes/60, minutes%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case m == 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+}
+
+// formatOptionalMinutes renders a nullable minute limit, "off" when unset.
+func formatOptionalMinutes(minutes *int) string {
+	if minutes == nil {
+		return "off"
+	}
+	return formatMinutes(*minutes)
+}
+
+// stopReasonText maps the API stop_reason to plain words.
+func stopReasonText(reason string) string {
+	switch reason {
+	case "user":
+		return "Stopped on request"
+	case "max_runtime":
+		return "Reached its max runtime"
+	case "idle":
+		return "Stopped when idle"
+	case "budget":
+		return "Environment budget reached"
+	case "low_balance":
+		return "Balance ran out"
+	case "failed":
+		return "Failed"
+	case "system":
+		return "Stopped by Runcrate"
+	default:
+		return reason
+	}
+}
 
 // parseGPUFlag parses the --gpu flag value which may contain a colon-separated
 // count (e.g. "H100:2"). Returns the GPU type and count. If --gpu-count was
@@ -151,18 +240,31 @@ var instancesTypesCmd = &cobra.Command{
 var instancesCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create and deploy a new instance",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := loadClient()
-		if err != nil {
-			return err
-		}
+	Long: `Create and deploy a new instance.
 
+For unattended or agent-run work, set --max-runtime and --idle-stop so the instance
+does not keep billing after the job ends. Auto stop terminates the instance, so keep
+anything you need on a storage volume.`,
+	Example: "  runcrate instances create --name train --gpu H100 --max-runtime 4h --idle-stop 30m",
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		gpuRaw, _ := cmd.Flags().GetString("gpu")
 		gpuCountRaw, _ := cmd.Flags().GetInt("gpu-count")
 		region, _ := cmd.Flags().GetString("region")
 		template, _ := cmd.Flags().GetString("template")
 		typeID, _ := cmd.Flags().GetString("type-id")
+		volumeID, _ := cmd.Flags().GetString("volume")
+		maxRuntimeRaw, _ := cmd.Flags().GetString("max-runtime")
+		idleStopRaw, _ := cmd.Flags().GetString("idle-stop")
+
+		maxRuntime, err := parseMinutesFlag("max-runtime", maxRuntimeRaw, maxRuntimeMaxMinutes)
+		if err != nil {
+			return err
+		}
+		idleStop, err := parseMinutesFlag("idle-stop", idleStopRaw, idleStopMaxMinutes)
+		if err != nil {
+			return err
+		}
 
 		gpuType, gpuCount, err := parseGPUFlag(gpuRaw, gpuCountRaw, cmd.Flags().Changed("gpu-count"))
 		if err != nil {
@@ -176,6 +278,11 @@ var instancesCreateCmd = &cobra.Command{
 			return fmt.Errorf("provide --gpu for auto-deploy or --type-id from 'runcrate instances types'")
 		}
 
+		client, err := loadClient()
+		if err != nil {
+			return err
+		}
+
 		// Check for duplicate active instance name
 		existing, _ := client.ListInstances("")
 		for _, inst := range existing {
@@ -185,15 +292,21 @@ var instancesCreateCmd = &cobra.Command{
 		}
 
 		req := api.CreateInstanceRequest{
-			Name:           name,
-			GPUType:        gpuType,
-			GPUCount:       gpuCount,
-			Region:         region,
-			Template:       template,
-			InstanceTypeID: typeID,
+			Name:                name,
+			GPUType:             gpuType,
+			GPUCount:            gpuCount,
+			Region:              region,
+			Template:            template,
+			InstanceTypeID:      typeID,
+			MaxRuntimeMinutes:   maxRuntime,
+			IdleShutdownMinutes: idleStop,
+			StorageID:           volumeID,
 		}
 
 		instance, err := client.CreateInstance(req)
+		if api.IsBudgetReached(err) {
+			return errors.New(budgetReachedMessage)
+		}
 		if err != nil {
 			return fmt.Errorf("creating instance: %w", err)
 		}
@@ -209,8 +322,13 @@ var instancesCreateCmd = &cobra.Command{
 
 		fmt.Println()
 		fmt.Printf("  Instance queued: %s (%s)\n", instance.Name, gpu)
-		fmt.Printf("  ID:    %s\n", instance.ID)
-		fmt.Printf("  Cost:  $%.2f/hr\n", instance.CostPerHour)
+		fmt.Printf("  ID:          %s\n", instance.ID)
+		fmt.Printf("  Cost:        $%.2f/hr\n", instance.CostPerHour)
+		fmt.Printf("  Max runtime: %s\n", formatOptionalMinutes(instance.MaxRuntimeMinutes))
+		fmt.Printf("  Idle stop:   %s\n", formatOptionalMinutes(instance.IdleShutdownMinutes))
+		if volumeID != "" {
+			fmt.Printf("  Volume:      %s, at /workspace\n", volumeID)
+		}
 		fmt.Println()
 		fmt.Println("  Provisioning in the background. Track with:")
 		fmt.Printf("    runcrate instances status %s\n", instance.Name)
@@ -250,23 +368,96 @@ var instancesInfoCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		fmt.Printf("  Name:      %s\n", instance.Name)
-		fmt.Printf("  ID:        %s\n", instance.ID)
-		fmt.Printf("  Status:    %s\n", statusColor(instance.Status))
-		fmt.Printf("  GPU:       %dx %s\n", instance.GPUCount, instance.GPUType)
-		fmt.Printf("  CPU:       %d cores\n", instance.CPUCores)
-		fmt.Printf("  Memory:    %d GB\n", instance.Memory)
-		fmt.Printf("  Storage:   %d GB\n", instance.Storage)
-		fmt.Printf("  Region:    %s\n", instance.Region)
+		fmt.Printf("  Name:         %s\n", instance.Name)
+		fmt.Printf("  ID:           %s\n", instance.ID)
+		fmt.Printf("  Status:       %s\n", statusColor(instance.Status))
+		fmt.Printf("  GPU:          %dx %s\n", instance.GPUCount, instance.GPUType)
+		fmt.Printf("  CPU:          %d cores\n", instance.CPUCores)
+		fmt.Printf("  Memory:       %d GB\n", instance.Memory)
+		fmt.Printf("  Storage:      %d GB\n", instance.Storage)
+		fmt.Printf("  Region:       %s\n", instance.Region)
 		if instance.IP != "" {
-			fmt.Printf("  IP:        %s\n", instance.IP)
+			fmt.Printf("  IP:           %s\n", instance.IP)
 		}
-		fmt.Printf("  Image:     %s\n", instance.OSImage)
-		fmt.Printf("  Cost:      $%.2f/hr\n", instance.CostPerHour)
+		fmt.Printf("  Image:        %s\n", instance.OSImage)
+		fmt.Printf("  Cost:         $%.2f/hr\n", instance.CostPerHour)
+		fmt.Printf("  Max runtime:  %s\n", formatOptionalMinutes(instance.MaxRuntimeMinutes))
+		fmt.Printf("  Idle stop:    %s\n", formatOptionalMinutes(instance.IdleShutdownMinutes))
+		if instance.AutoStopAt != nil {
+			fmt.Printf("  Auto stop at: %s\n", *instance.AutoStopAt)
+		}
+		if instance.StopReason != nil {
+			fmt.Printf("  Stop reason:  %s\n", stopReasonText(*instance.StopReason))
+		}
 		if instance.DeployedAt != "" {
-			fmt.Printf("  Deployed:  %s\n", instance.DeployedAt)
+			fmt.Printf("  Deployed:     %s\n", instance.DeployedAt)
 		}
-		fmt.Printf("  Created:   %s\n", instance.CreatedAt)
+		fmt.Printf("  Created:      %s\n", instance.CreatedAt)
+		fmt.Println()
+		return nil
+	},
+}
+
+// ── auto-stop ───────────────────────────────────────────────────────────────
+
+var instancesAutoStopCmd = &cobra.Command{
+	Use:   "auto-stop <name-or-id>",
+	Short: "Change when a running instance stops on its own",
+	Long: `Change the max runtime or idle stop of a starting or running instance.
+
+Max runtime counts from when the instance started running, so give the total, not
+extra time. A change never stops the instance sooner than 2 minutes from now. Use
+off to turn a limit off; a flag you leave out keeps its value. Either limit
+terminates the instance.`,
+	Example: `  runcrate instances auto-stop training-run --max-runtime 8h
+  runcrate instances auto-stop notebook --idle-stop 30m
+  runcrate instances auto-stop job --max-runtime off --idle-stop off`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fields := map[string]*int{}
+		if cmd.Flags().Changed("max-runtime") {
+			raw, _ := cmd.Flags().GetString("max-runtime")
+			v, err := parseAutoStopFlag("max-runtime", raw, maxRuntimeMaxMinutes)
+			if err != nil {
+				return err
+			}
+			fields["max_runtime_minutes"] = v
+		}
+		if cmd.Flags().Changed("idle-stop") {
+			raw, _ := cmd.Flags().GetString("idle-stop")
+			v, err := parseAutoStopFlag("idle-stop", raw, idleStopMaxMinutes)
+			if err != nil {
+				return err
+			}
+			fields["idle_shutdown_minutes"] = v
+		}
+		if len(fields) == 0 {
+			return fmt.Errorf("pass --max-runtime, --idle-stop or both (off turns one off)")
+		}
+
+		client, err := loadClient()
+		if err != nil {
+			return err
+		}
+		id, err := resolveInstanceID(client, args[0])
+		if err != nil {
+			return err
+		}
+		instance, err := client.UpdateInstanceAutoStop(id, fields)
+		if err != nil {
+			return fmt.Errorf("changing auto stop: %w", err)
+		}
+
+		if jsonOutput {
+			return printJSON(instance)
+		}
+		fmt.Println()
+		fmt.Printf("  Name:         %s\n", instance.Name)
+		fmt.Printf("  Max runtime:  %s\n", formatOptionalMinutes(instance.MaxRuntimeMinutes))
+		fmt.Printf("  Idle stop:    %s\n", formatOptionalMinutes(instance.IdleShutdownMinutes))
+		if instance.AutoStopAt != nil {
+			fmt.Printf("  Auto stop at: %s\n", *instance.AutoStopAt)
+		}
 		fmt.Println()
 		return nil
 	},
@@ -313,7 +504,7 @@ var instancesDeleteCmd = &cobra.Command{
 	Use:     "delete <name-or-id>",
 	Aliases: []string{"rm"},
 	Short:   "Terminate an instance",
-	Args:  cobra.ExactArgs(1),
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := loadClient()
 		if err != nil {
@@ -398,12 +589,24 @@ func init() {
 	instancesCreateCmd.Flags().String("region", "", "Preferred region")
 	instancesCreateCmd.Flags().String("template", "", "OS template")
 	instancesCreateCmd.Flags().String("type-id", "", "Instance type ID from 'runcrate instances types'")
+	instancesCreateCmd.Flags().String("volume", "", "Storage volume ID to attach, from 'runcrate volumes list'; its files are at /workspace")
+	instancesCreateCmd.Flags().String("max-runtime", "",
+		"Stop the instance automatically after this long, 5m to 168h (e.g. 4h). Recommended for unattended work")
+	instancesCreateCmd.Flags().String("idle-stop", "",
+		"Stop the instance after this long with GPU use under 5% and nobody connected (SSH, web terminal or editor), 5m to 24h (e.g. 30m), GPU instances only. Recommended for unattended work")
+
+	// auto-stop
+	instancesAutoStopCmd.Flags().String("max-runtime", "",
+		"Total time the instance may run, counted from when it started, 5m to 168h (e.g. 8h), or off")
+	instancesAutoStopCmd.Flags().String("idle-stop", "",
+		"Stop after this long with GPU use under 5% and nobody connected, 5m to 24h (e.g. 30m), or off")
 
 	// Wire subcommands
 	instancesCmd.AddCommand(instancesListCmd)
 	instancesCmd.AddCommand(instancesTypesCmd)
 	instancesCmd.AddCommand(instancesCreateCmd)
 	instancesCmd.AddCommand(instancesInfoCmd)
+	instancesCmd.AddCommand(instancesAutoStopCmd)
 	instancesCmd.AddCommand(instancesStatusCmd)
 	instancesCmd.AddCommand(instancesDeleteCmd)
 	rootCmd.AddCommand(instancesCmd)

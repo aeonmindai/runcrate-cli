@@ -82,7 +82,7 @@ type CreateJobRequest struct {
 const LongPollTimeout = 40 * time.Second
 
 // CreateJob submits a job. When the job was created but its machine could not
-// be launched, the *StatusError carries Details["job_id"].
+// be launched, the *APIError carries Details["job_id"].
 func (c *Client) CreateJob(req CreateJobRequest) (*Job, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

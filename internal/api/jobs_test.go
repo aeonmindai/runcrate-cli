@@ -80,8 +80,8 @@ func TestCreateJobErrors(t *testing.T) {
 	}
 
 	err = do("launch")
-	var se *StatusError
-	if !errors.As(err, &se) || se.StatusCode != 503 || se.Details["job_id"] != "job-9" {
+	var se *APIError
+	if !errors.As(err, &se) || se.Status != 503 || se.Details["job_id"] != "job-9" {
 		t.Errorf("launch failure error = %#v", err)
 	}
 	if err.Error() != "No machine available (HTTP 503)" {

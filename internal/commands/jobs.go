@@ -55,14 +55,14 @@ func backoff(attempt int) time.Duration {
 // errors, rate limits and server errors. 401 is retried a few times because
 // the client is rebuilt (and its token refreshed) before each attempt.
 func retryable(err error, authFailures int) bool {
-	var se *api.StatusError
+	var se *api.APIError
 	if !errors.As(err, &se) {
 		return true
 	}
 	switch {
-	case se.StatusCode == http.StatusUnauthorized:
+	case se.Status == http.StatusUnauthorized:
 		return authFailures <= 3
-	case se.StatusCode == http.StatusTooManyRequests, se.StatusCode >= 500:
+	case se.Status == http.StatusTooManyRequests, se.Status >= 500:
 		return true
 	}
 	return false
@@ -87,8 +87,8 @@ func (f *jobFollower) call(ctx context.Context, fn func(*api.Client) error) erro
 		if ctx.Err() != nil {
 			return errDetached
 		}
-		var se *api.StatusError
-		if errors.As(err, &se) && se.StatusCode == http.StatusUnauthorized {
+		var se *api.APIError
+		if errors.As(err, &se) && se.Status == http.StatusUnauthorized {
 			authFailures++
 		}
 		if !retryable(err, authFailures) {

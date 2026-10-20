@@ -200,6 +200,35 @@ func TestCreateInstance(t *testing.T) {
 	}
 }
 
+// The API attaches a volume only when the body names it as storage_id, and leaves it out otherwise.
+func TestCreateInstanceSendsVolumeAsStorageID(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"data": Instance{ID: "inst-new"}})
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	for _, req := range []CreateInstanceRequest{
+		{Name: "with-volume", GPUType: "H100", StorageID: "vol-1"},
+		{Name: "without", GPUType: "H100"},
+	} {
+		if _, err := client.CreateInstance(req); err != nil {
+			t.Fatalf("CreateInstance(%s) error: %v", req.Name, err)
+		}
+	}
+	if got := bodies[0]["storage_id"]; got != "vol-1" {
+		t.Errorf("storage_id = %v, want vol-1", got)
+	}
+	if _, ok := bodies[1]["storage_id"]; ok {
+		t.Errorf("storage_id sent without a volume: %v", bodies[1])
+	}
+}
+
 func TestDeleteInstance(t *testing.T) {
 	server := mockInstancesServer(t)
 	defer server.Close()
@@ -242,5 +271,130 @@ func TestGetSSHCertificate(t *testing.T) {
 	}
 	if cert.Certificate == "" {
 		t.Error("certificate is empty")
+	}
+}
+
+func TestCreateInstance_AutoStopFields(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"data":{"id":"inst-new","max_runtime_minutes":240,"idle_shutdown_minutes":null,` +
+			`"auto_stop_at":"2026-10-20T16:00:00.000Z","stop_reason":null}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	maxRuntime := 240
+	inst, err := client.CreateInstance(CreateInstanceRequest{Name: "a", GPUType: "H100", MaxRuntimeMinutes: &maxRuntime})
+	if err != nil {
+		t.Fatalf("CreateInstance() error: %v", err)
+	}
+	if _, err := client.CreateInstance(CreateInstanceRequest{Name: "b", GPUType: "H100"}); err != nil {
+		t.Fatalf("CreateInstance() error: %v", err)
+	}
+
+	if got := bodies[0]["max_runtime_minutes"]; got != float64(240) {
+		t.Errorf("max_runtime_minutes sent = %v, want 240", got)
+	}
+	if _, ok := bodies[0]["idle_shutdown_minutes"]; ok {
+		t.Error("idle_shutdown_minutes sent although unset")
+	}
+	for _, key := range []string{"max_runtime_minutes", "idle_shutdown_minutes"} {
+		if _, ok := bodies[1][key]; ok {
+			t.Errorf("%s sent although unset", key)
+		}
+	}
+
+	if inst.MaxRuntimeMinutes == nil || *inst.MaxRuntimeMinutes != 240 {
+		t.Errorf("MaxRuntimeMinutes = %v, want 240", inst.MaxRuntimeMinutes)
+	}
+	if inst.IdleShutdownMinutes != nil {
+		t.Errorf("IdleShutdownMinutes = %v, want nil", *inst.IdleShutdownMinutes)
+	}
+	if inst.AutoStopAt == nil || *inst.AutoStopAt != "2026-10-20T16:00:00.000Z" {
+		t.Errorf("AutoStopAt = %v, want 2026-10-20T16:00:00.000Z", inst.AutoStopAt)
+	}
+	if inst.StopReason != nil {
+		t.Errorf("StopReason = %q, want nil", *inst.StopReason)
+	}
+}
+
+func TestIsBudgetReached(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"budget reached", http.StatusPaymentRequired,
+			`{"error":{"code":"BUDGET_REACHED","message":"Environment budget reached"}}`, true},
+		{"budget reached lowercase code", http.StatusPaymentRequired,
+			`{"error":{"code":"budget_reached","message":"Environment budget reached"}}`, true},
+		{"low balance is a different 402", http.StatusPaymentRequired,
+			`{"error":{"code":"insufficient_credits","message":"Add credits"}}`, false},
+		{"other error", http.StatusBadRequest,
+			`{"error":{"code":"bad_request","message":"max_runtime_minutes must be between 5 and 10080"}}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			_, err := NewClient("rc_live_test", server.URL).CreateInstance(CreateInstanceRequest{Name: "a"})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if got := IsBudgetReached(err); got != tt.want {
+				t.Errorf("IsBudgetReached(%v) = %v, want %v", err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateInstanceAutoStop_SendsOnlyGivenFields(t *testing.T) {
+	var method, path string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		body = nil
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Write([]byte(`{"data":{"id":"inst-1","max_runtime_minutes":480,"idle_shutdown_minutes":null,` +
+			`"auto_stop_at":"2026-10-20T18:00:00.000Z"}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	maxRuntime := 480
+	inst, err := client.UpdateInstanceAutoStop("inst-1", map[string]*int{
+		"max_runtime_minutes":   &maxRuntime,
+		"idle_shutdown_minutes": nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstanceAutoStop() error: %v", err)
+	}
+	if method != "PATCH" || path != "/api/v1/instances/inst-1" {
+		t.Errorf("request = %s %s, want PATCH /api/v1/instances/inst-1", method, path)
+	}
+	if got := body["max_runtime_minutes"]; got != float64(480) {
+		t.Errorf("max_runtime_minutes sent = %v, want 480", got)
+	}
+	if got, ok := body["idle_shutdown_minutes"]; !ok || got != nil {
+		t.Errorf("idle_shutdown_minutes sent = %v (present %v), want null", got, ok)
+	}
+	if inst.AutoStopAt == nil || *inst.AutoStopAt != "2026-10-20T18:00:00.000Z" {
+		t.Errorf("AutoStopAt = %v", inst.AutoStopAt)
+	}
+
+	if _, err := client.UpdateInstanceAutoStop("inst-1", map[string]*int{"idle_shutdown_minutes": &maxRuntime}); err != nil {
+		t.Fatalf("UpdateInstanceAutoStop() error: %v", err)
+	}
+	if _, ok := body["max_runtime_minutes"]; ok {
+		t.Error("max_runtime_minutes sent although not given")
 	}
 }

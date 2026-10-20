@@ -24,6 +24,13 @@ type Instance struct {
 	DeployedAt  string  `json:"deployed_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+
+	// Auto stop guardrails. nil means off (no limit) or, for AutoStopAt and
+	// StopReason, not applicable yet.
+	MaxRuntimeMinutes   *int    `json:"max_runtime_minutes"`
+	IdleShutdownMinutes *int    `json:"idle_shutdown_minutes"`
+	AutoStopAt          *string `json:"auto_stop_at"`
+	StopReason          *string `json:"stop_reason"`
 }
 
 // InstanceType represents an available GPU instance type.
@@ -55,8 +62,13 @@ type CreateInstanceRequest struct {
 	SSHKeyID       string   `json:"ssh_key_id,omitempty"`
 	Template       string   `json:"template,omitempty"`
 	InstanceTypeID string   `json:"instance_type_id,omitempty"`
+	StorageID      string   `json:"storage_id,omitempty"`
 	EnvVars        []EnvVar `json:"env_vars,omitempty"`
 	StartupCmds    []string `json:"startup_commands,omitempty"`
+
+	// Optional auto stop guardrails, in whole minutes. Omitted when nil.
+	MaxRuntimeMinutes   *int `json:"max_runtime_minutes,omitempty"`
+	IdleShutdownMinutes *int `json:"idle_shutdown_minutes,omitempty"`
 }
 
 // EnvVar is a key-value pair for instance environment variables.
@@ -98,44 +110,17 @@ func (c *Client) GetSSHCertificate(instanceID, publicKey string) (*SSHCertificat
 	return &result.Data, nil
 }
 
-// StatusError is a non-2xx v1 response: `{ "error": { "code", "message", "details"? } }`.
-type StatusError struct {
-	StatusCode int
-	Code       string
-	Message    string
-	Details    map[string]any
-}
-
-func (e *StatusError) Error() string {
-	if e.StatusCode == http.StatusPaymentRequired && e.Code == "BUDGET_REACHED" {
-		return "this environment's monthly budget is reached; an owner or admin can raise it in the dashboard (HTTP 402)"
-	}
-	if e.Message != "" {
-		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.StatusCode)
-	}
-	return fmt.Sprintf("API error (HTTP %d)", e.StatusCode)
-}
-
-// checkHTTPStatus returns a *StatusError for non-2xx responses.
+// checkHTTPStatus returns an *APIError for non-2xx responses.
 func checkHTTPStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 
-	var errResp struct {
-		Error struct {
-			Code    string         `json:"code"`
-			Message string         `json:"message"`
-			Details map[string]any `json:"details"`
-		} `json:"error"`
-	}
-	e := &StatusError{StatusCode: resp.StatusCode}
-	if json.NewDecoder(resp.Body).Decode(&errResp) == nil {
-		e.Code = errResp.Error.Code
-		e.Message = errResp.Error.Message
-		e.Details = errResp.Error.Details
-	}
-	return e
+	var envelope errorEnvelope
+	_ = json.NewDecoder(resp.Body).Decode(&envelope)
+	apiErr := envelope.Error
+	apiErr.Status = resp.StatusCode
+	return &apiErr
 }
 
 // ListInstances returns all instances for the authenticated user.
@@ -243,6 +228,32 @@ func (c *Client) CreateInstance(req CreateInstanceRequest) (*Instance, error) {
 	}
 
 	resp, err := c.do("POST", "/api/v1/instances", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("network error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkHTTPStatus(resp); err != nil {
+		return nil, err
+	}
+
+	var result apiEnvelope[Instance]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+	return &result.Data, nil
+}
+
+// UpdateInstanceAutoStop changes a live instance's auto stop. Only the keys present
+// in fields are sent ("max_runtime_minutes", "idle_shutdown_minutes"); a nil value
+// sends null, which turns that limit off.
+func (c *Client) UpdateInstanceAutoStop(id string, fields map[string]*int) (*Instance, error) {
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+
+	resp, err := c.do("PATCH", "/api/v1/instances/"+id, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("network error: %w", err)
 	}

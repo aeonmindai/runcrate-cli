@@ -196,7 +196,7 @@ func runJob(cmd *cobra.Command, args []string) error {
 
 	job, err := client.CreateJob(req)
 	if err != nil {
-		var se *api.StatusError
+		var se *api.APIError
 		if errors.As(err, &se) {
 			if id, ok := se.Details["job_id"].(string); ok && id != "" {
 				return fmt.Errorf("creating job: %w\n  Job %s was created but its machine could not be launched; see: runcrate jobs status %s", err, id, id)
