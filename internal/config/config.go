@@ -70,7 +70,9 @@ func ConfigPath() string {
 	return filepath.Join(DefaultConfigDir(), configFileName)
 }
 
-func Load() (*Config, error) {
+// LoadFile reads only what is stored in the config file, without the
+// RUNCRATE_* environment overrides (logout signs out the stored token).
+func LoadFile() (*Config, error) {
 	cfg := &Config{
 		APIURL: defaultAPIURL,
 	}
@@ -83,6 +85,17 @@ func Load() (*Config, error) {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parsing config: %w", err)
 		}
+	}
+	if cfg.APIURL == "" {
+		cfg.APIURL = defaultAPIURL
+	}
+	return cfg, nil
+}
+
+func Load() (*Config, error) {
+	cfg, err := LoadFile()
+	if err != nil {
+		return nil, err
 	}
 
 	// Env vars override file values

@@ -18,7 +18,12 @@ type refreshResponse struct {
 	ExpiresAt    int64  `json:"expires_at"`
 }
 
+// RefreshTokens renews a Supabase session from an older login. An agent token
+// is never renewed: once it expires, the user signs in again.
 func RefreshTokens(cfg *config.Config) error {
+	if IsAgentToken(cfg.AccessToken) {
+		return fmt.Errorf("this sign-in has expired")
+	}
 	if cfg.SupabaseURL == "" || cfg.RefreshToken == "" {
 		return fmt.Errorf("missing Supabase config — please re-login")
 	}
