@@ -111,6 +111,21 @@ runcrate schedule delete <id> [--yes]  # what it already started keeps running
   that key is revoked or the sign-in ends, the schedule pauses (last result
   `paused: key revoked`).
 
+## Secrets
+
+Secrets are environment variables every instance and job launched in an
+environment gets, such as `HF_TOKEN`. The CLI shows their names, never their
+values; a workspace owner or manager sets them in the dashboard
+(https://runcrate.ai/dashboard/settings/secrets).
+
+```bash
+runcrate secrets list [-q] [--json]   # names in the current environment, sensitive or not, last change
+runcrate envs switch staging && runcrate secrets list
+```
+
+A value passed for one launch (`runcrate run --env HF_TOKEN=...`) wins over the
+secret of the same name.
+
 ## AI clients (MCP)
 
 Runcrate runs a remote MCP server at `https://mcp.runcrate.ai/mcp`. One command
