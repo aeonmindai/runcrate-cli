@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,16 +12,18 @@ import (
 
 const logoutAgentToken = "rca_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
-// logoutWith runs `runcrate logout` with an agent token stored, and returns how
-// many sign-outs reached the server.
-func logoutWith(t *testing.T, envToken string) int {
+// logoutWith runs `runcrate logout` with an agent token stored, and returns the
+// tokens whose sign-out reached the server.
+func logoutWith(t *testing.T, envToken string) []string {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("RUNCRATE_ACCESS_TOKEN", envToken)
-	revoked := 0
+	var revoked []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/oauth/revoke" {
-			revoked++
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			revoked = append(revoked, body["token"])
 		}
 		w.Write([]byte(`{}`))
 	}))
@@ -39,13 +42,15 @@ func logoutWith(t *testing.T, envToken string) int {
 }
 
 func TestLogoutSignsTheStoredAgentTokenOut(t *testing.T) {
-	if got := logoutWith(t, ""); got != 1 {
-		t.Errorf("sign-outs sent = %d, want 1", got)
+	if got := logoutWith(t, ""); len(got) != 1 || got[0] != logoutAgentToken {
+		t.Errorf("signed out %q, want the stored token", got)
 	}
 }
 
-func TestLogoutLeavesATokenFromTheEnvironmentAlone(t *testing.T) {
-	if got := logoutWith(t, "rca_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"); got != 0 {
-		t.Errorf("sign-outs sent = %d, want 0", got)
+func TestLogoutSignsTheStoredTokenOutEvenWithATokenInTheEnvironment(t *testing.T) {
+	envToken := "rca_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+	got := logoutWith(t, envToken)
+	if len(got) != 1 || got[0] != logoutAgentToken {
+		t.Errorf("signed out %q, want only the stored token", got)
 	}
 }

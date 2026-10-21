@@ -14,8 +14,9 @@ var logoutCmd = &cobra.Command{
 	Short: "Sign out and clear stored credentials",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The stored agent token is signed out on Runcrate first, so a copy of it stops
-		// working too. A token given in RUNCRATE_ACCESS_TOKEN is not stored, and is left alone.
-		if cfg, err := config.Load(); err == nil && os.Getenv("RUNCRATE_ACCESS_TOKEN") == "" && auth.IsAgentToken(cfg.AccessToken) {
+		// working too. Read from the file itself: a token given in RUNCRATE_ACCESS_TOKEN is
+		// not stored, is left alone, and must not hide the stored one.
+		if cfg, err := config.LoadFile(); err == nil && auth.IsAgentToken(cfg.AccessToken) {
 			if err := auth.RevokeAgentToken(cfg.APIURL, cfg.AccessToken); err != nil {
 				fmt.Fprintf(os.Stderr, "Could not sign out on Runcrate (%v). Sign this CLI out on the API keys page of the dashboard.\n", err)
 			}

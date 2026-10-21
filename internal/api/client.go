@@ -138,59 +138,6 @@ func (c *Client) ValidateKey() error {
 	return fmt.Errorf("API error (%d): %s", resp.StatusCode, envelope.Error.Message)
 }
 
-// ── Legacy API key exchange (kept for backward compat) ─────────────────────
-
-type TokenResponse struct {
-	APIKey    string `json:"api_key"`
-	KeyPrefix string `json:"key_prefix"`
-}
-
-func ExchangeCode(baseURL, code string) (*TokenResponse, error) {
-	url := strings.TrimRight(baseURL, "/") + "/api/auth/cli/token"
-
-	payload := fmt.Sprintf(`{"code":"%s"}`, code)
-	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "runcrate-cli/"+Version)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("network error: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("token exchange failed: %s", errResp.Error)
-		}
-		return nil, fmt.Errorf("token exchange failed (HTTP %d)", resp.StatusCode)
-	}
-
-	var token TokenResponse
-	if err := json.Unmarshal(body, &token); err != nil {
-		return nil, fmt.Errorf("parsing response: %w", err)
-	}
-
-	if token.APIKey == "" {
-		return nil, fmt.Errorf("server returned empty API key")
-	}
-
-	return &token, nil
-}
-
 // ── OAuth token exchange ───────────────────────────────────────────────────
 
 type OAuthWorkspace struct {
