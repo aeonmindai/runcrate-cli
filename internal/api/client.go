@@ -83,8 +83,21 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 // doCtx is do with a request context, for calls that can be cancelled or need
 // a deadline other than the client's default timeout.
 func (c *Client) doCtx(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	return c.doCtxHeaders(ctx, method, path, body, nil)
+}
+
+// doCtxHeaders is doCtx with extra request headers (an Idempotency-Key).
+func (c *Client) doCtxHeaders(ctx context.Context, method, path string, body io.Reader, headers map[string]string) (*http.Response, error) {
+	req, err := c.newRequest(ctx, method, path, body, headers)
+	if err != nil {
+		return nil, err
+	}
+	return c.httpClient.Do(req)
+}
+
+// newRequest builds an authenticated request to the API.
+func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader, headers map[string]string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +117,10 @@ func (c *Client) doCtx(ctx context.Context, method, path string, body io.Reader)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-
-	return c.httpClient.Do(req)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return req, nil
 }
 
 func (c *Client) DoRaw(method, path string, body io.Reader) (*http.Response, error) {

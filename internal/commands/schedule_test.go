@@ -185,7 +185,7 @@ func TestBuildScheduleRequestRefusals(t *testing.T) {
 		{"instance flag on a job", []string{"--cron", "0 2 * * *", "--gpu", "H100", "--max-runtime", "1h", "--idle-stop", "30m", "--", "true"}, "--idle-stop only applies to instance"},
 		{"job flag on an instance", []string{"--cron", "0 2 * * *", "--name", "box", "--gpu", "H100", "--max-runtime", "1h", "--image", "x"}, "--image only applies to job"},
 		{"instance needs a name", []string{"--cron", "0 2 * * *", "--gpu", "H100", "--max-runtime", "1h"}, "--name is required"},
-		{"job runtime over 24h", []string{"--cron", "0 2 * * *", "--gpu", "H100", "--max-runtime", "25h", "--", "true"}, "between 1m and 24h"},
+		{"job runtime over 7 days", []string{"--cron", "0 2 * * *", "--gpu", "H100", "--max-runtime", "169h", "--", "true"}, "between 1m and 168h"},
 		{"instance runtime under 5m", []string{"--cron", "0 2 * * *", "--name", "box", "--gpu", "H100", "--max-runtime", "2m"}, "between 5m"},
 	}
 	for _, tt := range tests {

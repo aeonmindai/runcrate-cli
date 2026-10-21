@@ -28,12 +28,13 @@ func TestParseMaxRuntime(t *testing.T) {
 		{in: "90s", want: 2},
 		{in: "1s", want: 1},
 		{in: "24h", want: 1440},
-		{in: "1440", want: 1440},
+		{in: "168h", want: 10080},
+		{in: "10080", want: 10080},
 		{in: "0", wantErr: true},
 		{in: "0s", wantErr: true},
 		{in: "-5m", wantErr: true},
-		{in: "25h", wantErr: true},
-		{in: "1441", wantErr: true},
+		{in: "168h1s", wantErr: true},
+		{in: "10081", wantErr: true},
 		{in: "two hours", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -119,7 +120,9 @@ func TestBuildJobRequestBody(t *testing.T) {
 		"no command":       {"--gpu", "A4000"},
 		"bad env key":      {"--gpu", "A4000", "--env", "1A=x", "--", "true"},
 		"unset env":        {"--gpu", "A4000", "--env", "MISSING", "--", "true"},
-		"runtime too long": {"--gpu", "A4000", "--max-runtime", "25h", "--", "true"},
+		"runtime too long": {"--gpu", "A4000", "--max-runtime", "169h", "--", "true"},
+		"bad gpu list":     {"--gpu", "H100,:2", "--", "true"},
+		"gpu list count":   {"--gpu", "H100,A100:9", "--", "true"},
 	} {
 		if _, err := parse(argv...); err == nil {
 			t.Errorf("%s: expected an error", name)

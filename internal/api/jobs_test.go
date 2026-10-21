@@ -23,16 +23,17 @@ func TestCreateJobSendsContractBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	job, err := NewClient("rc_live_test", server.URL).CreateJob(CreateJobRequest{
+	sub, err := NewClient("rc_live_test", server.URL).CreateJob(CreateJobRequest{
 		Command:           "python train.py",
 		GPUType:           "A4000",
 		MaxRuntimeMinutes: 90,
 		Env:               map[string]string{"HF_TOKEN": "secret"},
 		StorageID:         "vol-1",
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("CreateJob() error: %v", err)
 	}
+	job := sub.Job
 	if job.ID != "job-1" || job.Status != "queued" || job.ExitCode != nil || job.CostUSD != nil {
 		t.Errorf("job = %+v", job)
 	}
@@ -47,7 +48,8 @@ func TestCreateJobSendsContractBody(t *testing.T) {
 	if !ok || env["HF_TOKEN"] != "secret" {
 		t.Errorf("env = %#v, want an object", body["env"])
 	}
-	for _, unset := range []string{"template", "image", "name", "region"} {
+	for _, unset := range []string{"template", "image", "name", "region", "count", "params", "tags", "code",
+		"max_retries", "capacity_wait_minutes", "webhook_url", "image_registry_auth", "allow_cpu_container"} {
 		if _, ok := body[unset]; ok {
 			t.Errorf("unset %q was sent: %v", unset, body[unset])
 		}
@@ -70,7 +72,7 @@ func TestCreateJobErrors(t *testing.T) {
 	do := func(c string) error {
 		client := NewClient("rc_live_test", server.URL)
 		client.httpClient.Transport = headerTransport{"X-Case", c}
-		_, err := client.CreateJob(CreateJobRequest{Command: "true", GPUType: "A4000", MaxRuntimeMinutes: 1})
+		_, err := client.CreateJob(CreateJobRequest{Command: "true", GPUType: "A4000", MaxRuntimeMinutes: 1}, "")
 		return err
 	}
 
@@ -130,14 +132,108 @@ func TestListJobsPassesFiltersAndReadsMeta(t *testing.T) {
 	}))
 	defer server.Close()
 
-	list, err := NewClient("rc_live_test", server.URL).ListJobs("running,queued", 2, "prev")
+	list, err := NewClient("rc_live_test", server.URL).ListJobs(JobFilters{
+		Status: "running,queued", Tags: map[string]string{"team": "ml"}, GroupID: "g1",
+		Query: "train", GPUType: "H100", CreatedAfter: "2026-10-20T00:00:00Z",
+	}, 2, "prev")
 	if err != nil {
 		t.Fatalf("ListJobs() error: %v", err)
 	}
-	if query != "cursor=prev&limit=2&status=running%2Cqueued" {
+	if query != "created_after=2026-10-20T00%3A00%3A00Z&cursor=prev&gpu_type=H100&group_id=g1&limit=2&q=train&status=running%2Cqueued&tag=team%3Aml" {
 		t.Errorf("query = %q", query)
 	}
 	if len(list.Jobs) != 2 || list.Cursor != "abc" || !list.HasMore {
 		t.Errorf("list = %+v", list)
+	}
+}
+
+func TestSubmitSendsAnIdempotencyKeyAndReadsAGroup(t *testing.T) {
+	var keys []string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		json.NewDecoder(r.Body).Decode(&body)
+		if r.URL.Path == "/api/v1/jobs/job-1/rerun" {
+			w.Header().Set("Idempotent-Replayed", "true")
+			w.Write([]byte(`{"data":{"id":"job-2","status":"queued","rerun_of":"job-1"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"data":{"id":"g1","count":2,"max_parallel":1,"status_counts":{"queued":2},"jobs":[{"id":"a"},{"id":"b"}]}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+
+	sub, err := client.CreateJob(CreateJobRequest{
+		Command: "x", GPUType: []string{"H100", "A100-80GB:2"}, MaxRuntimeMinutes: 5,
+		Params: []map[string]string{{"LR": "0.1"}, {"LR": "0.2"}}, MaxParallel: 1,
+		Code: &JobCode{Git: &JobGit{URL: "https://github.com/a/b", TokenEnv: "GIT_TOKEN"}},
+	}, "")
+	if err != nil {
+		t.Fatalf("CreateJob() error: %v", err)
+	}
+	if sub.Job != nil || sub.Group == nil || sub.Group.ID != "g1" || len(sub.Group.Jobs) != 2 {
+		t.Fatalf("submission = %+v", sub)
+	}
+	if gpus, _ := body["gpu_type"].([]any); len(gpus) != 2 || gpus[1] != "A100-80GB:2" {
+		t.Errorf("gpu_type = %#v, want the list", body["gpu_type"])
+	}
+	if code, _ := body["code"].(map[string]any); code["git"].(map[string]any)["token_env"] != "GIT_TOKEN" || code["upload_id"] != nil {
+		t.Errorf("code = %#v", body["code"])
+	}
+
+	sub, err = client.RerunJob("job-1", map[string]any{"gpu_count": 2}, "my-key")
+	if err != nil {
+		t.Fatalf("RerunJob() error: %v", err)
+	}
+	if sub.Job == nil || sub.Job.RerunOf != "job-1" || !sub.Replayed || body["gpu_count"] != float64(2) {
+		t.Errorf("rerun = %+v, body %v", sub, body)
+	}
+	if len(keys[0]) != 36 || keys[1] != "my-key" {
+		t.Errorf("Idempotency-Keys = %q, want a fresh UUID then the given key", keys)
+	}
+}
+
+func TestArtifactURLReadsTheRedirectWithoutFollowingIt(t *testing.T) {
+	var signedHits int
+	var signedAuth string
+	signed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		signedHits++
+		signedAuth = r.Header.Get("Authorization")
+		w.Write([]byte("bytes"))
+	}))
+	defer signed.Close()
+	var path string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.EscapedPath()
+		if strings.HasSuffix(path, "/missing") {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":{"code":"not_found","message":"The job has no such output"}}`))
+			return
+		}
+		http.Redirect(w, r, signed.URL+"/o?sig=1", http.StatusFound)
+	}))
+	defer api.Close()
+	client := NewClient("rc_live_test", api.URL)
+
+	url, err := client.ArtifactURL("job-1", "runs/a b.txt")
+	if err != nil {
+		t.Fatalf("ArtifactURL() error: %v", err)
+	}
+	if url != signed.URL+"/o?sig=1" || signedHits != 0 {
+		t.Errorf("url = %q after %d hits on the signed URL, want it unfollowed", url, signedHits)
+	}
+	if path != "/api/v1/jobs/job-1/artifacts/runs/a%20b.txt" {
+		t.Errorf("path = %q", path)
+	}
+	var out strings.Builder
+	if err := DownloadSigned(context.Background(), url, &out); err != nil || out.String() != "bytes" || signedAuth != "" {
+		t.Errorf("download = %q, %v, Authorization %q", out.String(), err, signedAuth)
+	}
+
+	_, err = client.ArtifactURL("job-1", "missing")
+	var se *APIError
+	if !errors.As(err, &se) || se.Status != 404 {
+		t.Errorf("missing output error = %v", err)
 	}
 }
