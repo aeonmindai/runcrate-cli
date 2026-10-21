@@ -15,7 +15,7 @@ curl -sSL https://runcrate.ai/install.sh | sh
 **Homebrew (macOS / Linux):**
 
 ```bash
-brew install aeonmindai/tap/runcrate
+brew install runcrateai/tap/runcrate
 ```
 
 **Windows (PowerShell):**
@@ -24,7 +24,7 @@ brew install aeonmindai/tap/runcrate
 irm https://runcrate.ai/install.ps1 | iex
 ```
 
-Binaries are published to this repo's [GitHub Releases](https://github.com/aeonmindai/runcrate-cli/releases)
+Binaries are published to this repo's [GitHub Releases](https://github.com/runcrateai/runcrate-cli/releases)
 for linux/macOS (amd64 + arm64) and windows (amd64). `rc` is installed as a
 shortcut alias for `runcrate`.
 
@@ -194,7 +194,7 @@ Releases are tag-driven. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.
 which tests, cross-compiles the five targets, generates `checksums.txt`, and
 publishes a GitHub Release. The public installer scripts and `runcrate update`
 read these releases, so no separate publish step is needed. The same workflow asks
-[aeonmindai/homebrew-tap](https://github.com/aeonmindai/homebrew-tap) to regenerate its
+[runcrateai/homebrew-tap](https://github.com/runcrateai/homebrew-tap) to regenerate its
 formula from the new checksums (needs the `HOMEBREW_TAP_TOKEN` secret; without it the
 tap's own six-hourly sync picks the release up).
 

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	releasesURL = "https://api.github.com/repos/aeonmindai/runcrate-cli/releases?per_page=20"
+	releasesURL = "https://api.github.com/repos/runcrateai/runcrate-cli/releases?per_page=20"
 	httpTimeout = 10 * time.Second
 )
 

@@ -67,7 +67,7 @@ jobs:
 
             **Homebrew (macOS / Linux):**
             ```bash
-            brew install aeonmindai/tap/runcrate
+            brew install runcrateai/tap/runcrate
             ```
 
             **Windows (PowerShell):**
@@ -81,7 +81,7 @@ jobs:
             brew upgrade runcrate     # Homebrew installs
             ```
 
-      # Tell aeonmindai/homebrew-tap to regenerate Formula/runcrate.rb from this release's
+      # Tell runcrateai/homebrew-tap to regenerate Formula/runcrate.rb from this release's
       # checksums. Needs a HOMEBREW_TAP_TOKEN secret that can dispatch to that repo; without
       # it the step is skipped and the tap's six-hourly sync picks the release up instead.
       - name: Update Homebrew tap
@@ -98,5 +98,5 @@ jobs:
           curl -fsS --retry 3 -X POST \
             -H "Authorization: Bearer ${TAP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/aeonmindai/homebrew-tap/dispatches \
+            https://api.github.com/repos/runcrateai/homebrew-tap/dispatches \
             -d "{\"event_type\":\"cli-release\",\"client_payload\":{\"tag\":\"${TAG}\"}}"
