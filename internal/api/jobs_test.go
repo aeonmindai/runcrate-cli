@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateJobSendsContractBody(t *testing.T) {
@@ -235,5 +236,49 @@ func TestArtifactURLReadsTheRedirectWithoutFollowingIt(t *testing.T) {
 	var se *APIError
 	if !errors.As(err, &se) || se.Status != 404 {
 		t.Errorf("missing output error = %v", err)
+	}
+}
+
+func TestSubmitNetworkErrorCarriesTheKeyItSent(t *testing.T) {
+	var sent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = r.Header.Get("Idempotency-Key")
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close() // the answer is lost
+	}))
+	defer server.Close()
+
+	_, err := NewClient("rc_live_test", server.URL).CreateJob(CreateJobRequest{Command: "x", GPUType: "A4000", MaxRuntimeMinutes: 1}, "")
+	var ne *SubmitNetworkError
+	if !errors.As(err, &ne) || ne.Key == "" || ne.Key != sent {
+		t.Fatalf("err = %#v, want a SubmitNetworkError with the key sent (%q)", err, sent)
+	}
+}
+
+func TestSlowRoutesOutliveTheDefaultTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		if r.URL.Path == "/api/v1/job-groups/g1/cancel" {
+			w.Write([]byte(`{"data":{"id":"g1","count":2,"status_counts":{"cancelled":2}}}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"data":{"id":"job-1","status":"queued"}}`))
+	}))
+	defer server.Close()
+	client := NewClient("rc_live_test", server.URL)
+	client.httpClient.Timeout = 50 * time.Millisecond
+
+	if _, err := client.GetJobGroup("g1"); err == nil {
+		t.Fatal("a plain read did not time out: the test cannot tell the timeouts apart")
+	}
+	if g, err := client.CancelJobGroup("g1"); err != nil || g.StatusCounts["cancelled"] != 2 {
+		t.Errorf("group cancel = %+v, %v: it must wait as long as the route may take", g, err)
+	}
+	if sub, err := client.CreateJob(CreateJobRequest{Command: "x", GPUType: "A4000", MaxRuntimeMinutes: 1}, ""); err != nil || sub.Job.ID != "job-1" {
+		t.Errorf("submit = %+v, %v: it must wait as long as the route may take", sub, err)
+	}
+	if client.httpClient.Timeout != 50*time.Millisecond {
+		t.Error("a slow route changed the client's own timeout")
 	}
 }

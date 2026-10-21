@@ -360,7 +360,7 @@ var skippedCodeDirs = map[string]bool{".git": true, "__pycache__": true, "node_m
 
 // codeArchive is the tar.gz to upload for --code: a .tar.gz or .tgz file as
 // it is, or a directory packed here (regular files only, without .git,
-// __pycache__ and node_modules).
+// __pycache__ and node_modules), byte for byte the same for the same files.
 func codeArchive(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -396,11 +396,15 @@ func codeArchive(path string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		hdr, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
+		// Only the name, mode and contents go in, so the same files make the
+		// same bytes (and the same sha256, which the upload dedupes on).
+		hdr := &tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     filepath.ToSlash(rel),
+			Mode:     int64(info.Mode().Perm()),
+			Size:     info.Size(),
+			ModTime:  time.Unix(0, 0),
 		}
-		hdr.Name = filepath.ToSlash(rel)
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
@@ -532,8 +536,14 @@ func readFileOrStdin(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// submitError names the job that was created when its machine could not be launched.
+// submitError names the job that was created when its machine could not be
+// launched, and, when no answer came, the key that finds the job if it was made.
 func submitError(doing string, err error) error {
+	var ne *api.SubmitNetworkError
+	if errors.As(err, &ne) {
+		return fmt.Errorf("%s: %w\n  The job may have been created. Re-run the same command with --idempotency-key %s: "+
+			"it answers that job instead of starting another (for 24 hours)", doing, err, ne.Key)
+	}
 	var se *api.APIError
 	if errors.As(err, &se) {
 		if id, ok := se.Details["job_id"].(string); ok && id != "" {

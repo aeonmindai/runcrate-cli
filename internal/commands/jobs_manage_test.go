@@ -279,9 +279,11 @@ func TestDownloadSavesOutputsAtTheirPathsAndChecksThem(t *testing.T) {
 		t.Error("the partial file was kept")
 	}
 
-	escape := []api.Artifact{{Path: "../outside.txt", Bytes: 1, SHA256: sum("x")}}
-	if err := d.download(context.Background(), "job-1", escape, dir, false); err == nil || !strings.Contains(err.Error(), "leaves the download directory") {
-		t.Errorf("escaping path error = %v, want it refused before any download", err)
+	for _, p := range []string{"../outside.txt", "/etc/passwd", `..\outside.txt`, `runs\a.txt`} {
+		escape := []api.Artifact{{Path: p, Bytes: 1, SHA256: sum("x")}}
+		if err := d.download(context.Background(), "job-1", escape, dir, false); err == nil || !strings.Contains(err.Error(), "leaves the download directory") {
+			t.Errorf("path %q: error = %v, want it refused before any download", p, err)
+		}
 	}
 }
 
@@ -335,5 +337,79 @@ func TestCodeArchiveLeavesOutGitAndCaches(t *testing.T) {
 	}
 	if _, err := codeArchive(filepath.Join(dir, "train.py")); err == nil {
 		t.Error("a file that is not a .tar.gz was accepted")
+	}
+}
+
+func TestCodeArchiveIsTheSameBytesForTheSameFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "pkg"), 0o755)
+	os.WriteFile(filepath.Join(dir, "train.py"), []byte("print(1)"), 0o755)
+	os.WriteFile(filepath.Join(dir, "pkg", "u.py"), []byte("x = 1"), 0o644)
+	first, err := codeArchive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(filepath.Join(dir, "train.py"), later, later)
+	os.Chtimes(filepath.Join(dir, "pkg"), later, later)
+	second, err := codeArchive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("touching the files changed the archive, so the upload is not deduplicated")
+	}
+	tr := tar.NewReader(mustGunzip(t, second))
+	h, _ := tr.Next()
+	if h.Name != "pkg/u.py" || h.Uid != 0 || h.Uname != "" || !h.ModTime.Equal(time.Unix(0, 0)) {
+		t.Errorf("header = %+v, want no owner and a fixed time", h)
+	}
+	if h, _ := tr.Next(); h.Mode&0o111 == 0 {
+		t.Error("the executable bit of train.py was lost")
+	}
+}
+
+func mustGunzip(t *testing.T, b []byte) io.Reader {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gz
+}
+
+func TestGroupCancelAsksFirst(t *testing.T) {
+	var cancels int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			cancels++
+		}
+		io.WriteString(w, `{"data":{"id":"g1","count":3,"max_parallel":3,"status_counts":{"running":2,"succeeded":1}}}`)
+	}))
+	defer srv.Close()
+	client := api.NewClient("rc_live_test", srv.URL)
+	var out, prompt bytes.Buffer
+
+	if err := cancelGroup(client, "g1", false, strings.NewReader("n\n"), &out, &prompt); err != nil || cancels != 0 {
+		t.Fatalf("answering n: err %v, %d cancels", err, cancels)
+	}
+	if !strings.Contains(prompt.String(), "Cancel 2 live job(s)") {
+		t.Errorf("prompt = %q", prompt.String())
+	}
+	if err := cancelGroup(client, "g1", false, strings.NewReader(""), &out, &prompt); err == nil || cancels != 0 {
+		t.Errorf("no answer: err %v, %d cancels; want a --yes hint and nothing cancelled", err, cancels)
+	}
+	if err := cancelGroup(client, "g1", false, strings.NewReader("y\n"), &out, &prompt); err != nil || cancels != 1 {
+		t.Errorf("answering y: err %v, %d cancels", err, cancels)
+	}
+	if err := cancelGroup(client, "g1", true, strings.NewReader(""), &out, &prompt); err != nil || cancels != 2 {
+		t.Errorf("--yes: err %v, %d cancels", err, cancels)
+	}
+}
+
+func TestSubmitErrorTellsTheKeyToRerunWith(t *testing.T) {
+	err := submitError("creating job", &api.SubmitNetworkError{Key: "k-123", Err: errors.New("connection reset")})
+	if !strings.Contains(err.Error(), "--idempotency-key k-123") {
+		t.Errorf("error = %q, want the key to re-run with", err)
 	}
 }

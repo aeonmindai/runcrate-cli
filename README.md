@@ -74,7 +74,8 @@ runcrate jobs download <id> [path...] [-o dir]
 runcrate jobs rerun <id> [--gpu H100] [--env KEY=VALUE]
 runcrate jobs cancel <id>
 runcrate jobs delete <id>
-runcrate jobs group status|cancel <group-id>
+runcrate jobs group status <group-id>
+runcrate jobs group cancel <group-id> [--yes]   # asks first: it stops every live machine
 ```
 
 - The command runs with bash in `/workspace`, which holds the volume's files when
@@ -92,7 +93,8 @@ runcrate jobs group status|cancel <group-id>
 - `--env KEY=VALUE` is repeatable; `--env KEY` copies the value from your shell.
   Values are stored only encrypted and never shown; `jobs rerun` reuses them.
 - Every submit sends an Idempotency-Key; pass `--idempotency-key` to make a script
-  safe to run twice (the second run answers the first job for 24 hours).
+  safe to run twice (the second run answers the first job for 24 hours). When the
+  answer to a submit is lost, the error prints the key it sent: re-run with it.
 - `runcrate run`, `runcrate jobs logs -f` and `runcrate jobs wait` exit with the job's
   code: the command's own code, 124 on timeout, 130 when cancelled (`jobs wait` exits
   75 when its `--timeout` passes first). Ctrl-C detaches and leaves the job running;

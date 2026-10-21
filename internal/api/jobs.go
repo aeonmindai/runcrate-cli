@@ -226,6 +226,36 @@ type CreateJobRequest struct {
 	AllowCPUContainer   bool                `json:"allow_cpu_container,omitempty"`
 }
 
+const (
+	// SubmitTimeout is how long a submit or rerun may take: the route launches
+	// for up to 120 s before it answers.
+	SubmitTimeout = 135 * time.Second
+	// GroupCancelTimeout is how long a group cancel may take: the route stops
+	// every machine, each with a final volume copy-up, for up to 300 s.
+	GroupCancelTimeout = 315 * time.Second
+)
+
+// SubmitNetworkError is a submit whose answer never came: the job may have
+// been created. Sending the same request with Key within 24 hours answers that
+// job instead of starting another.
+type SubmitNetworkError struct {
+	Key string
+	Err error
+}
+
+func (e *SubmitNetworkError) Error() string { return "network error: " + e.Err.Error() }
+func (e *SubmitNetworkError) Unwrap() error { return e.Err }
+
+// withTimeout is c with a request timeout of at least d, for routes that may
+// take longer than the default to answer.
+func (c *Client) withTimeout(d time.Duration) *Client {
+	long := *c
+	httpClient := *c.httpClient
+	httpClient.Timeout = max(httpClient.Timeout, d)
+	long.httpClient = &httpClient
+	return &long
+}
+
 // LongPollTimeout bounds a follow=true logs request. The server holds it for
 // up to 25 s, so this leaves room for the response without hanging on a dead
 // connection for the client's default timeout.
@@ -243,7 +273,8 @@ func NewIdempotencyKey() string {
 
 // submit POSTs a job body with an Idempotency-Key and reads a job or a group.
 // When the job was created but its machine could not be launched, the
-// *APIError carries Details["job_id"].
+// *APIError carries Details["job_id"]; when no answer came, the error is a
+// *SubmitNetworkError with the key to send again.
 func (c *Client) submit(path string, body any, idempotencyKey string) (*JobSubmission, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -252,10 +283,10 @@ func (c *Client) submit(path string, body any, idempotencyKey string) (*JobSubmi
 	if idempotencyKey == "" {
 		idempotencyKey = NewIdempotencyKey()
 	}
-	resp, err := c.doCtxHeaders(context.Background(), "POST", path, bytes.NewReader(raw),
+	resp, err := c.withTimeout(SubmitTimeout).doCtxHeaders(context.Background(), "POST", path, bytes.NewReader(raw),
 		map[string]string{"Idempotency-Key": idempotencyKey})
 	if err != nil {
-		return nil, fmt.Errorf("network error: %w", err)
+		return nil, &SubmitNetworkError{Key: idempotencyKey, Err: err}
 	}
 	defer resp.Body.Close()
 	if err := checkHTTPStatus(resp); err != nil {
@@ -479,7 +510,7 @@ func (c *Client) GetJobGroup(id string) (*JobGroup, error) {
 // CancelJobGroup cancels every job of the group that has not ended.
 func (c *Client) CancelJobGroup(id string) (*JobGroup, error) {
 	var group JobGroup
-	if err := c.postJSON("/api/v1/job-groups/"+url.PathEscape(id)+"/cancel", nil, &group); err != nil {
+	if err := c.withTimeout(GroupCancelTimeout).postJSON("/api/v1/job-groups/"+url.PathEscape(id)+"/cancel", nil, &group); err != nil {
 		return nil, err
 	}
 	return &group, nil

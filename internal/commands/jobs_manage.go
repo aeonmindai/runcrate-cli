@@ -361,7 +361,7 @@ func (d *artifactDownloader) download(ctx context.Context, id string, artifacts 
 	var total int64
 	for _, a := range artifacts {
 		rel := filepath.FromSlash(a.Path)
-		if !filepath.IsLocal(rel) {
+		if strings.Contains(a.Path, "\\") || !filepath.IsLocal(rel) {
 			return fmt.Errorf("refusing output path %q: it leaves the download directory", a.Path)
 		}
 		dest := filepath.Join(dir, rel)
@@ -524,16 +524,43 @@ var jobsGroupCancelCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		g, err := client.CancelJobGroup(args[0])
-		if err != nil {
-			return fmt.Errorf("cancelling group: %w", err)
-		}
-		if jsonOutput {
-			return printJSON(g)
-		}
-		renderJobGroup(os.Stdout, g)
-		return nil
+		yes, _ := cmd.Flags().GetBool("yes")
+		return cancelGroup(client, args[0], yes, os.Stdin, os.Stdout, os.Stderr)
 	},
+}
+
+// cancelGroup cancels a group's live jobs, after asking unless yes: it can
+// stop up to 100 machines at once.
+func cancelGroup(client *api.Client, id string, yes bool, stdin io.Reader, stdout, stderr io.Writer) error {
+	if !yes {
+		g, err := client.GetJobGroup(id)
+		if err != nil {
+			return fmt.Errorf("fetching group: %w", err)
+		}
+		live := g.StatusCounts["queued"] + g.StatusCounts["starting"] + g.StatusCounts["running"]
+		if live == 0 {
+			fmt.Fprintln(stdout, "Every job of the group has already ended.")
+			return nil
+		}
+		ok, err := confirm(stdin, stderr,
+			fmt.Sprintf("Cancel %d live job(s) of group %s and stop their machines? [y/N] ", live, g.ID))
+		if err != nil {
+			return errors.New("no answer to the prompt; pass --yes to cancel without asking")
+		}
+		if !ok {
+			fmt.Fprintln(stdout, "Kept the group's jobs running.")
+			return nil
+		}
+	}
+	g, err := client.CancelJobGroup(id)
+	if err != nil {
+		return fmt.Errorf("cancelling group: %w", err)
+	}
+	if jsonOutput {
+		return printJSONTo(stdout, g)
+	}
+	renderJobGroup(stdout, g)
+	return nil
 }
 
 func init() {
@@ -541,6 +568,7 @@ func init() {
 	jobsDownloadCmd.Flags().StringP("output", "o", ".", "Directory to save the outputs in, at their paths")
 	jobsDownloadCmd.Flags().Bool("force", false, "Replace files that already exist")
 	jobsDeleteCmd.Flags().BoolP("yes", "y", false, "Delete without asking")
+	jobsGroupCancelCmd.Flags().BoolP("yes", "y", false, "Cancel without asking")
 
 	jobsGroupCmd.AddCommand(jobsGroupStatusCmd)
 	jobsGroupCmd.AddCommand(jobsGroupCancelCmd)
