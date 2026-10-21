@@ -111,6 +111,30 @@ runcrate schedule delete <id> [--yes]  # what it already started keeps running
   that key is revoked or the sign-in ends, the schedule pauses (last result
   `paused: key revoked`).
 
+## AI clients (MCP)
+
+Runcrate runs a remote MCP server at `https://mcp.runcrate.ai/mcp`. One command
+adds it to your AI clients; each one opens your browser to sign in on first use.
+No key to paste.
+
+```bash
+runcrate mcp install                            # every client found on this machine
+runcrate mcp install --client cursor --dry-run  # show the change, write nothing
+runcrate mcp install --client claude,codex
+runcrate mcp url                                # print the server URL
+```
+
+- Clients: `cursor`, `claude` (Claude Code), `vscode`, `codex`, `windsurf` (and
+  Devin Desktop), `gemini`, or `all` (the default).
+- Where a client has its own `mcp add` command it is used; otherwise its config
+  file is merged. Other servers stay, and the original is backed up next to it as
+  `<file>.bak-<YYYYMMDD-HHMMSS>`.
+- A file with comments or other non-JSON content is never written: the snippet to
+  add is printed instead. An existing `runcrate` entry that points somewhere else
+  is kept unless you pass `--force`.
+- Codex: run `codex mcp login runcrate` if it has not signed you in yet.
+- Setup guides for other clients: https://runcrate.ai/docs/mcp/setup
+
 ## Updating
 
 ```bash
