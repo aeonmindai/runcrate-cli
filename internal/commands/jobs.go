@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -316,6 +317,19 @@ func formatShortDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
+// formatTags renders tags as key=value, sorted by key.
+func formatTags(tags map[string]string) string {
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		keys[i] = k + "=" + tags[k]
+	}
+	return strings.Join(keys, ", ")
+}
+
 func formatCost(c float64) string {
 	if c > 0 && c < 0.01 {
 		return fmt.Sprintf("$%.4f", c)
@@ -328,7 +342,34 @@ func formatCost(c float64) string {
 var jobsCmd = &cobra.Command{
 	Use:     "jobs",
 	Aliases: []string{"job"},
-	Short:   "List, follow and cancel jobs started with runcrate run",
+	Short:   "List, follow, wait for, rerun and cancel jobs, and fetch their outputs",
+}
+
+// jobListFilters reads the filter flags of jobs list. --since is a duration
+// back from now (24h) or a time (2026-10-20T00:00:00Z).
+func jobListFilters(cmd *cobra.Command, now time.Time) (api.JobFilters, error) {
+	var f api.JobFilters
+	status, _ := cmd.Flags().GetString("status")
+	f.Status = strings.ReplaceAll(status, " ", "")
+	tagVals, _ := cmd.Flags().GetStringArray("tag")
+	tags, err := parseTagFlags(tagVals)
+	if err != nil {
+		return f, err
+	}
+	f.Tags = tags
+	f.GroupID, _ = cmd.Flags().GetString("group")
+	f.Query, _ = cmd.Flags().GetString("search")
+	f.GPUType, _ = cmd.Flags().GetString("gpu")
+	if since, _ := cmd.Flags().GetString("since"); since != "" {
+		if d, err := time.ParseDuration(since); err == nil && d > 0 {
+			f.CreatedAfter = now.Add(-d).UTC().Format(time.RFC3339)
+		} else if t, err := time.Parse(time.RFC3339, since); err == nil {
+			f.CreatedAfter = t.UTC().Format(time.RFC3339)
+		} else {
+			return f, fmt.Errorf("invalid --since %q: use a duration like 24h or a time like 2026-10-20T00:00:00Z", since)
+		}
+	}
+	return f, nil
 }
 
 var jobsListCmd = &cobra.Command{
@@ -341,9 +382,12 @@ var jobsListCmd = &cobra.Command{
 			return err
 		}
 
-		status, _ := cmd.Flags().GetString("status")
+		filters, err := jobListFilters(cmd, time.Now())
+		if err != nil {
+			return err
+		}
 		limit, _ := cmd.Flags().GetInt("limit")
-		list, err := client.ListJobs(strings.ReplaceAll(status, " ", ""), limit, "")
+		list, err := client.ListJobs(filters, limit, "")
 		if err != nil {
 			return fmt.Errorf("fetching jobs: %w", err)
 		}
@@ -442,10 +486,59 @@ var jobsStatusCmd = &cobra.Command{
 		if j.StorageID != "" {
 			fmt.Printf("  Volume:       %s\n", j.StorageID)
 		}
+		if len(j.GPUCandidates) > 1 {
+			var tries []string
+			for _, c := range j.GPUCandidates {
+				tries = append(tries, fmt.Sprintf("%dx %s", c.GPUCount, c.GPUType))
+			}
+			fmt.Printf("  GPUs tried:   %s\n", strings.Join(tries, ", then "))
+		}
 		if len(j.EnvKeys) > 0 {
 			fmt.Printf("  Env:          %s\n", strings.Join(j.EnvKeys, ", "))
 		}
+		if len(j.Tags) > 0 {
+			fmt.Printf("  Tags:         %s\n", formatTags(j.Tags))
+		}
+		if c := j.Code; c != nil {
+			switch c.Source {
+			case "git":
+				code := c.URL
+				if c.Ref != "" {
+					code += " @ " + c.Ref
+				}
+				if c.Commit != "" {
+					code += " (" + c.Commit[:min(len(c.Commit), 12)] + ")"
+				}
+				fmt.Printf("  Code:         %s\n", code)
+			default:
+				fmt.Printf("  Code:         upload %s\n", c.Ref)
+			}
+		}
 		fmt.Printf("  Max runtime:  %s\n", formatMinutes(j.MaxRuntimeMinutes))
+		if j.MaxRetries > 0 {
+			fmt.Printf("  Attempt:      %d of up to %d (retries on %s)\n", j.Attempt, j.MaxRetries+1, strings.Join(j.RetryOn, ", "))
+		}
+		if j.Status == "queued" && j.QueueReason != "" {
+			reason := map[string]string{
+				"no_capacity":  "waiting for a free GPU",
+				"budget":       "waiting for the environment's budget",
+				"max_parallel": "waiting for other jobs of its group",
+				"volume_busy":  "waiting for its volume",
+			}[j.QueueReason]
+			if reason == "" {
+				reason = j.QueueReason
+			}
+			fmt.Printf("  Waiting:      %s\n", reason)
+		}
+		if j.GroupID != "" {
+			fmt.Printf("  Group:        %s (job %d)\n", j.GroupID, j.JobIndex+1)
+		}
+		if j.RerunOf != "" {
+			fmt.Printf("  Rerun of:     %s\n", j.RerunOf)
+		}
+		if j.WebhookURL != "" {
+			fmt.Printf("  Webhook:      %s (%s)\n", j.WebhookURL, strings.Join(j.WebhookEvents, ", "))
+		}
 		if d, ok := jobRuntime(j, time.Now()); ok {
 			fmt.Printf("  Runtime:      %s\n", formatDuration(d))
 		}
@@ -470,6 +563,12 @@ var jobsStatusCmd = &cobra.Command{
 		}
 		if j.EndedAt != "" {
 			fmt.Printf("  Ended:        %s\n", j.EndedAt)
+		}
+		if j.GPUUtilAvg != nil {
+			fmt.Printf("  GPU use:      %.0f%% on average\n", *j.GPUUtilAvg)
+		}
+		if j.ArtifactsCount > 0 {
+			fmt.Printf("  Outputs:      %d (runcrate jobs artifacts %s)\n", j.ArtifactsCount, j.ID)
 		}
 		if j.LogsTruncated {
 			fmt.Printf("  Logs:         %.1f MB, middle dropped (kept the first 5 MB and the newest output)\n", float64(j.LogBytes)/(1<<20))
@@ -546,6 +645,11 @@ func init() {
 	jobsCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	jobsListCmd.Flags().String("status", "", "Only these statuses, comma separated (e.g. running,queued)")
+	jobsListCmd.Flags().StringArray("tag", nil, "Only jobs with this tag key=value (repeatable: all must match)")
+	jobsListCmd.Flags().String("group", "", "Only the jobs of this group")
+	jobsListCmd.Flags().String("search", "", "Only jobs whose name contains this")
+	jobsListCmd.Flags().String("gpu", "", "Only jobs that ran on this GPU")
+	jobsListCmd.Flags().String("since", "", "Only jobs created in the last duration (24h) or since a time (2026-10-20T00:00:00Z)")
 	jobsListCmd.Flags().Int("limit", 20, "How many jobs to show (max 100)")
 	jobsListCmd.Flags().BoolP("quiet", "q", false, "Only show job IDs")
 

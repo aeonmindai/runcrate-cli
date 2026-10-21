@@ -204,7 +204,7 @@ func buildScheduleRequest(cmd *cobra.Command, args []string, lookupEnv func(stri
 
 	maxRuntime, _ := flags.GetString("max-runtime")
 	if strings.TrimSpace(maxRuntime) == "" {
-		return req, "", errors.New("--max-runtime is required for a schedule, so nothing it starts keeps running (and billing) unattended, e.g. --max-runtime 2h (instances 5m to 168h, jobs 1m to 24h)")
+		return req, "", errors.New("--max-runtime is required for a schedule, so nothing it starts keeps running (and billing) unattended, e.g. --max-runtime 2h (5m to 168h for instances, 1m to 168h for jobs)")
 	}
 
 	req.Name, _ = flags.GetString("name")
@@ -271,7 +271,7 @@ as you, in the current environment. Recurring runs are at least 15 minutes apart
 	f.String("region", "", "Preferred region")
 	f.String("template", "", "OS template")
 	f.String("volume", "", "Storage volume ID; its files are at /workspace")
-	f.String("max-runtime", "", "Stop what it starts after this long (required): instances 5m to 168h, jobs 1m to 24h, e.g. 2h")
+	f.String("max-runtime", "", "Stop what it starts after this long (required): instances 5m to 168h, jobs 1m to 168h, e.g. 2h")
 	addInstanceOnlyFlags(cmd)
 	addJobOnlyFlags(cmd)
 	return cmd

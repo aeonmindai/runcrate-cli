@@ -63,25 +63,48 @@ machine (and its billing) when the command ends.
 runcrate run --gpu A4000 -- nvidia-smi
 runcrate run --gpu H100 --volume <volume-id> --max-runtime 2h -- python train.py --epochs 3
 runcrate run --gpu A4000 --env HF_TOKEN -d -- 'pip install -r requirements.txt && python eval.py'
-runcrate jobs list [--status running,queued] [--limit 20] [-q] [--json]
-runcrate jobs status <id>      # exit code, error, cost, instance, env keys
+runcrate run --gpu H100,A100-80GB --code . --retries 2 --tag project=vision -- python train.py
+runcrate run --gpu L40S --params sweep.json --max-parallel 4 -- 'python train.py --lr $LR'
+runcrate jobs list [--status running,queued] [--tag k=v] [--group <id>] [--since 24h] [--json]
+runcrate jobs status <id>      # exit code, error, cost, attempts, tags, code, outputs
 runcrate jobs logs <id> [-f]   # print output; -f follows until the job ends
+runcrate jobs wait <id> [--timeout 2h]
+runcrate jobs artifacts <id>   # files the command wrote to $RUNCRATE_OUTPUT_DIR
+runcrate jobs download <id> [path...] [-o dir]
+runcrate jobs rerun <id> [--gpu H100] [--env KEY=VALUE]
 runcrate jobs cancel <id>
+runcrate jobs delete <id>
+runcrate jobs group status <group-id>
+runcrate jobs group cancel <group-id> [--yes]   # asks first: it stops every live machine
 ```
 
 - The command runs with bash in `/workspace`, which holds the volume's files when
   `--volume` is set; files written there are copied back when the machine stops.
-- `--max-runtime` takes `90m`, `2h`, `1h30m` or minutes, from 1m to 24h (default 1h).
+  With `--code <dir>` (uploaded as a tar.gz without `.git`, `__pycache__` and
+  `node_modules`) or `--git <url>` it runs in `/workspace/code`.
+- `--max-runtime` takes `90m`, `2h`, `1h30m` or minutes, from 1m to 168h (default 1h),
+  per attempt.
+- `--gpu H100,A100-80GB:2` tries the GPUs in order; `--capacity-wait` (0 to 24h)
+  says how long to wait for one.
+- `--retries N` retries a failed machine on a new one; add `--retry-on nonzero_exit`
+  (and `--retry-exit-codes 137`) to retry the command's own failures.
+- `--count N` or `--params file.json` (a list of env objects) start a group of jobs,
+  at most `--max-parallel` at once; `run` prints their IDs and returns.
 - `--env KEY=VALUE` is repeatable; `--env KEY` copies the value from your shell.
-  Values are never stored or shown.
-- `runcrate run` and `runcrate jobs logs -f` exit with the job's code: the command's
-  own code, 124 on timeout, 130 when cancelled. Ctrl-C detaches and leaves the job
-  running; `-d` / `--detach` prints the job ID and returns.
+  Values are stored only encrypted and never shown; `jobs rerun` reuses them.
+- Every submit sends an Idempotency-Key; pass `--idempotency-key` to make a script
+  safe to run twice (the second run answers the first job for 24 hours). When the
+  answer to a submit is lost, the error prints the key it sent: re-run with it.
+- `runcrate run`, `runcrate jobs logs -f` and `runcrate jobs wait` exit with the job's
+  code: the command's own code, 124 on timeout, 130 when cancelled (`jobs wait` exits
+  75 when its `--timeout` passes first). Ctrl-C detaches and leaves the job running;
+  `-d` / `--detach` prints the job ID and returns.
 
 ## Schedules
 
 A schedule starts an instance or a job later: once with `--at`, or on a recurring
-5-field `--cron`. A command after `--` makes it a job (same flags as `runcrate run`);
+5-field `--cron`. A command after `--` makes it a job (the `runcrate run` flags from
+`--gpu` to `--region`; retries, groups, tags and code are for `runcrate run` only);
 without one it starts an instance (same flags as `runcrate instances create`, so
 `--name` is required). `--max-runtime` is required for both, so nothing a schedule
 starts keeps running unattended.

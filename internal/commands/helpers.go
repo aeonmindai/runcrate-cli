@@ -52,7 +52,12 @@ func newTableTo(w io.Writer) *tabwriter.Writer {
 
 // printJSON outputs data as indented JSON.
 func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+	return printJSONTo(os.Stdout, v)
+}
+
+// printJSONTo writes data as indented JSON to w.
+func printJSONTo(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
