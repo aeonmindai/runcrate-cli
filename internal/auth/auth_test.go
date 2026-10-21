@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runcrate/cli/internal/api"
 	"github.com/runcrate/cli/internal/config"
 )
 
@@ -271,3 +272,77 @@ func TestCallbackServer_CorsHeadersOnGet(t *testing.T) {
 	<-resultCh // drain
 }
 
+
+const testAgentToken = "rca_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+func TestLoginWithOAuth_AgentTokenKeepsItsEnvironment(t *testing.T) {
+	cleanup := setupTestHome(t)
+	defer cleanup()
+
+	resp := &api.OAuthTokenResponse{
+		AccessToken: testAgentToken,
+		ExpiresAt:   time.Now().Add(90 * 24 * time.Hour).Unix(),
+		Environment: &api.OAuthEnvironment{ID: "e1", Name: "agents"},
+	}
+	if err := LoginWithOAuth(resp, &api.OAuthWorkspace{ID: "p1", Name: "Acme", Role: "owner"}, "https://runcrate.test"); err != nil {
+		t.Fatalf("LoginWithOAuth() error: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load() error: %v", err)
+	}
+	if cfg.AccessToken != testAgentToken || cfg.Environment != "agents" || cfg.RefreshToken != "" || cfg.SupabaseURL != "" {
+		t.Errorf("saved %+v, want the agent token in environment agents and nothing for Supabase", cfg)
+	}
+}
+
+func TestRefreshTokens_AgentTokenIsNeverSentAnywhere(t *testing.T) {
+	cleanup := setupTestHome(t)
+	defer cleanup()
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(`{"access_token":"eyJ.session","refresh_token":"r","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{AccessToken: testAgentToken, RefreshToken: "r", SupabaseURL: server.URL, ExpiresAt: time.Now().Unix() - 1}
+	if !NeedsRefresh(cfg) {
+		t.Fatal("an expired agent token should be noticed")
+	}
+	if err := RefreshTokens(cfg); err == nil {
+		t.Fatal("RefreshTokens() renewed an agent token")
+	}
+	if calls != 0 || cfg.AccessToken != testAgentToken {
+		t.Errorf("an agent token went to the auth server (%d calls) or was replaced (%q)", calls, cfg.AccessToken)
+	}
+}
+
+func TestRevokeAgentToken(t *testing.T) {
+	var got struct {
+		path  string
+		token string
+	}
+	status := http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		got.path, got.token = r.URL.Path, body["token"]
+		w.WriteHeader(status)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	if err := RevokeAgentToken(server.URL+"/", testAgentToken); err != nil {
+		t.Fatalf("RevokeAgentToken() error: %v", err)
+	}
+	if got.path != "/api/auth/oauth/revoke" || got.token != testAgentToken {
+		t.Errorf("revoked %q at %q", got.token, got.path)
+	}
+
+	status = http.StatusServiceUnavailable
+	if err := RevokeAgentToken(server.URL, testAgentToken); err == nil {
+		t.Error("a sign-out the server could not record is reported as done")
+	}
+}

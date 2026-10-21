@@ -200,15 +200,25 @@ type OAuthWorkspace struct {
 	IsDefault bool   `json:"is_default"`
 }
 
+// OAuthEnvironment is the one environment an agent token acts in.
+type OAuthEnvironment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// OAuthTokenResponse is what /api/auth/oauth/token answers. Since agent tokens
+// (rca_...), the access token is opaque, lasts until ExpiresAt and has no refresh
+// token; RefreshToken and the Supabase fields are only set by older servers.
 type OAuthTokenResponse struct {
-	AccessToken  string           `json:"access_token"`
-	RefreshToken string           `json:"refresh_token"`
-	ExpiresAt    int64            `json:"expires_at"`
-	UserEmail    string           `json:"user_email"`
-	UserName     string           `json:"user_name"`
-	Workspaces   []OAuthWorkspace `json:"workspaces"`
-	SupabaseURL  string           `json:"supabase_url"`
-	SupabaseAnon string           `json:"supabase_anon_key"`
+	AccessToken  string            `json:"access_token"`
+	RefreshToken string            `json:"refresh_token"`
+	ExpiresAt    int64             `json:"expires_at"`
+	UserEmail    string            `json:"user_email"`
+	UserName     string            `json:"user_name"`
+	Workspaces   []OAuthWorkspace  `json:"workspaces"`
+	Environment  *OAuthEnvironment `json:"environment"`
+	SupabaseURL  string            `json:"supabase_url"`
+	SupabaseAnon string            `json:"supabase_anon_key"`
 }
 
 func ExchangeCodeOAuth(baseURL, code string) (*OAuthTokenResponse, error) {
