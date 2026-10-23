@@ -151,9 +151,16 @@ secret of the same name.
 
 ## AI clients (MCP)
 
-Runcrate runs a remote MCP server at `https://mcp.runcrate.ai/mcp`. One command
-adds it to your AI clients; each one opens your browser to sign in on first use.
-No key to paste.
+Runcrate runs a remote MCP server at `https://mcp.runcrate.ai/mcp`. The quickest
+way in is one line pasted into your agent (Claude Code, Codex, Cursor, VS Code,
+OpenCode or any agent that runs commands). It adds the server to itself, and the
+first Runcrate tool call opens your browser to sign in. No key to paste.
+
+```text
+Add Runcrate's MCP server to yourself: run curl -fsSL "https://runcrate.ai/mcp.md" and follow it.
+```
+
+From a terminal, one command adds it to every AI client on this machine instead:
 
 ```bash
 runcrate mcp install                            # every client found on this machine
